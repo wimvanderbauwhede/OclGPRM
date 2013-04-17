@@ -15,7 +15,7 @@ BIN = vm
 TEST = vmtest
 
 CC = g++
-CFLAGS = -Wall -Wextra -pedantic -Werror -g -I $(INCDIR)
+CFLAGS = -Wall -Wextra -pedantic -Werror -g -I $(INCDIR) -DEX=$(EX)
 
 all: $(BIN)
 

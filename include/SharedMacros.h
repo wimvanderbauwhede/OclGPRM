@@ -33,4 +33,8 @@
 #define REFERENCE 1
 #define DATA      2
 
+/* WV size of I/O buffer pointer file and register file */
+#define BUFFER_PTR_FILE_SZ 256
+#define REGISTER_FILE_SZ 256
+
 #endif
