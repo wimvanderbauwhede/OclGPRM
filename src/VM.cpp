@@ -144,7 +144,7 @@ int main(int argc, char **argv) {
             - sizeof(int)
             - CODE_STORE_SIZE * QUEUE_SIZE * sizeof(bytecode)
             - sizeof(subt)            
-            )/ sizeof(cl_uint) - ;// 4; // How many 32-bit integers?
+            ) / sizeof(cl_uint);// 4; // How many 32-bit integers?
     
     /* The data store */
     cl_uint *data = new cl_uint[dataSize];

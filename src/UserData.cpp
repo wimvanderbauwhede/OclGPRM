@@ -19,12 +19,12 @@ void populateData(cl_uint *data) {
 
   /* Total number of memory sections allocated. */
   // WV I think of this as number of I/O registers used
-  unsigned int n_io_regs = 6
+  unsigned int n_io_regs = 6;
 
   data[0] = n_io_regs;
   /* Pointers to allocated memory. */
   // WV start of memory area allocated for I/O buffers
-  data[1] = BUFFER_FILE_SZ + REGISTER_FILE_SZ; // reg 0
+  data[1] = BUFFER_PTR_FILE_SZ + REGISTER_FILE_SZ; // reg 0
   data[2] = data[1] + (dim * dim); // reg 1
   data[3] = data[2] + (dim * dim); // reg 2
   data[4] = data[3] + (dim * dim); // reg 4
@@ -64,11 +64,11 @@ void populateData(cl_uint *data) {
   int dim = 1024; // N rows of a square matrix.
   
   /* Total number of memory sections allocated. */
-   unsigned int n_io_regs = 3
+   unsigned int n_io_regs = 3;
   data[0] = n_io_regs;
   
   /* Pointers to allocated memory. */
-  data[1] =  BUFFER_FILE_SZ + REGISTER_FILE_SZ;
+  data[1] =  BUFFER_PTR_FILE_SZ + REGISTER_FILE_SZ;
   data[2] = data[1] + (dim * dim);
   data[3] = data[2] + (dim * dim);
   
