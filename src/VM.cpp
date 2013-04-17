@@ -175,7 +175,8 @@ int main(int argc, char **argv) {
     kernel.setArg(6, dataBuffer);
     
     /* Set the NDRange. */
-    cl::NDRange global(nServices), local(nServices);
+    //ORIG cl::NDRange global(nServices), local(nServices);
+    cl::NDRange global(nServices), local(1); // means nServices compute units, one thread per unit
 
     /* Run the kernel on NDRange until completion. */
     while (*state != COMPLETE) {
