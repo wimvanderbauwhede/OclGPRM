@@ -21,7 +21,9 @@
    arg_pos:4bits      00000000000000000011110000000000  The argument position.
    subtask:10bits     00000000111111111100000000000000  The subtask record.
    payload_type:1bit  00000001000000000000000000000000  The payload type. */
+#ifndef _IN_HOST
 typedef uint2 packet;
+#endif
 
 /* Bytecode consists of 64bit words. */
 typedef ulong bytecode;

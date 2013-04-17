@@ -1,14 +1,22 @@
 #ifndef _PACKET_H_
 #define _PACKET_H_
-#define _IN_HOST
 
 /* Contains the definitions and functions necessary for creating the initial
    reference packet in the host program. Replicates the same functionality available
    in the kernel program. */
-
+#ifdef OSX
+#include <cl.hpp>
+#else
 #include <CL/cl.hpp>
-#include "SharedTypes.h"
+#endif
 
+#define _IN_HOST
+
+#include "SharedTypes.h"
+struct packet {
+    int x;
+    int y;
+};
 packet pkt_base_init();
 packet pkt_create(uint type, uint source, uint arg, uint sub, uint payload);
 void pkt_set_type(packet *p, uint type);

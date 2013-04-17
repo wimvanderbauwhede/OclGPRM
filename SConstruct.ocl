@@ -1,0 +1,14 @@
+from OclBuilder import initOcl
+
+sources=Split("""
+DeviceInfo.cc        
+Packet.cpp
+UserData.cpp
+VM.cpp
+""")
+
+sources = map (lambda s: 'src/'+s, sources)
+env = initOcl()
+env.Append(CPPPATH=['./include'])
+env.Program('vm',sources)	
+

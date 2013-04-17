@@ -1,7 +1,11 @@
 #define __CL_ENABLE_EXCEPTIONS
 #define _IN_HOST
 
+#ifdef OSX
+#include <cl.hpp>
+#else
 #include <CL/cl.hpp>
+#endif
 #include <unistd.h>
 #include <iostream>
 #include <fstream>
@@ -17,7 +21,7 @@
 
 const char *KERNEL_NAME = "vm";
 const char *KERNEL_FILE = "kernels/VM.cl";
-const char *KERNEL_BUILD_OPTIONS = "-I include";
+const char *KERNEL_BUILD_OPTIONS = "-I./include";
 
 const int NARGS = 3;
 const int NPACKET_SHIFT = ((NBYTES * 8) - 16);

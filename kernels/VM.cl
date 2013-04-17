@@ -2,11 +2,11 @@
 #include "../tests/kerneltypes.h"
 #endif
 
-#include "SharedMacros.h"
-#include "SharedTypes.h"
-#include "Services.h"
+#include "./include/SharedMacros.h"
+#include "./include/SharedTypes.h"
+#include "./include/Services.h"
 
-#define RETURN_REL_PTR 1
+#define RETURN_REL_PTR 0
 
 /* Base K_B symbol. */
 #define SYMBOL_KB_ZERO 0x6040000000000000

@@ -5,6 +5,10 @@
 #include <ctime>
 #include <iostream>
 
+#ifndef EX
+#define EX SELECT
+#endif
+
 /* Generate a random number between 0 and max. */
 int randomNumber(int max) {
   return (rand() % (max + 1));
