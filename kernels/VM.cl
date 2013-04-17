@@ -6,6 +6,8 @@
 #include "SharedTypes.h"
 #include "Services.h"
 
+#define RETURN_REL_PTR 1
+
 /* Base K_B symbol. */
 #define SYMBOL_KB_ZERO 0x6040000000000000
 
@@ -205,7 +207,12 @@ __global void *get_arg_value(uint arg_pos, __global subt_rec *rec, __global uint
   }
 
   // K_P symbol - Value is a pointer, actual arg in data buffer.
+  // WV: this is *not* a symbol, it is an absolute pointer to the memory 
+#if RETURN_REL_PTR == 1
   return data + value;
+#else
+  return value;
+#endif  
 }
 
 /**************************/
@@ -400,7 +407,7 @@ uint service_compute(__global subt* subt, uint subtask, __global uint *data) {
 
   switch (service) {
   case M_OclGannet_MAT_mult: {
-    __global int *m1 = get_arg_value(0, rec, data);
+    __global int *m1 = get_arg_value(0, rec, data); 
     __global int *m2 = get_arg_value(1, rec, data);
     __global uint *result = get_arg_value(2, rec, data);
     __global int *sz = get_arg_value(3, rec, data);
@@ -416,8 +423,13 @@ uint service_compute(__global subt* subt, uint subtask, __global uint *data) {
         *(result + (i * n + r)) = sum;
       }
     }
-
-    return result - data;
+#if RETURN_REL_PTR == 1
+    return result - data; // WV: returns a relative pointer, i.e. the index in the data array.
+#else
+    return result;
+#endif    
+    // This is because (ptr ) returns a relative pointer. 
+    // It might be nicer to have (ptr) return an absolute pointer, so we can return absolute pointers
   }
 
   case M_OclGannet_MAT_add: {
@@ -434,8 +446,12 @@ uint service_compute(__global subt* subt, uint subtask, __global uint *data) {
       }
     }
 
-    return result - data;
-  }
+#if RETURN_REL_PTR == 1
+    return result - data; // WV: returns a relative pointer, i.e. the index in the data array.
+#else
+    return result;
+#endif  
+    }
 
   case M_OclGannet_MAT_unit: {
     __global uint *m = get_arg_value(0, rec, data);
@@ -447,20 +463,53 @@ uint service_compute(__global subt* subt, uint subtask, __global uint *data) {
         *(m + (i * n + j)) = (i == j) ? 1 : 0;
       }
     }
-    
-    return m - data;
+#if RETURN_REL_PTR == 1
+    return m - data; // WV: returns a relative pointer, i.e. the index in the data array.
+#else
+    return m; // 
+#endif      
   }
 
   case M_OclGannet_MEM_ptr: {
     uint arg1 = (uint) get_arg_value(0, rec, data);
+#if RETURN_REL_PTR == 1
     return data[DATA_INFO_OFFSET + arg1];
+#else
+    return data + data[DATA_INFO_OFFSET + arg1];
+#endif    
   }
     
   case M_OclGannet_MEM_const: {
     uint arg1 = (uint) get_arg_value(0, rec, data);
-    return arg1 + 1;
+#if RETURN_REL_PTR == 1
+    return arg1 + DATA_INFO_OFFSET; // the index of the constant
+#else    
+    return data + arg1 + DATA_INFO_OFFSET; // a pointer to the constant
+#endif    
   }
+    
+  case M_OclGannet_REG_read: {
+    uint arg1 = (uint) get_arg_value(0, rec, data);
+#if RETURN_REL_PTR == 1
+    return arg1 + DATA_INFO_OFFSET + BUFFER_PTR_FILE_SZ; // the index of the reg
+#else    
+    return data + arg1 + DATA_INFO_OFFSET + BUFFER_PTR_FILE_SZ; // a pointer to the reg
+#endif    
   }
+    
+  case M_OclGannet_REG_write: {
+    uint arg1 = (uint) get_arg_value(0, rec, data);
+    uint arg2 = (uint) get_arg_value(1, rec, data);
+    data[arg1 + DATA_INFO_OFFSET + BUFFER_PTR_FILE_SZ]=arg2;
+#if RETURN_REL_PTR == 1
+    return arg1 + DATA_INFO_OFFSET + BUFFER_PTR_FILE_SZ; // the index of the reg
+#else    
+    return data + arg1 + DATA_INFO_OFFSET + BUFFER_PTR_FILE_SZ; // a pointer to the reg
+#endif    
+  }
+    
+
+  }; // END of switch() of 
 
   return 0;
 }

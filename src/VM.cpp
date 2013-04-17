@@ -137,8 +137,14 @@ int main(int argc, char **argv) {
 
     /* The subtask table. */
     subt *subtaskTable = createSubt();
-
-    long dataSize = maxGlobalAlloc / 4; // How many 32-bit integers?
+    // WV: The data buffer covers the whole memory apart from the memory used by the VM's data structures
+    unsigned long dataSize = (
+            maxGlobalAlloc 
+            - 2* qBufSize * sizeof(packet) 
+            - sizeof(int)
+            - CODE_STORE_SIZE * QUEUE_SIZE * sizeof(bytecode)
+            - sizeof(subt)            
+            )/ sizeof(cl_uint) - ;// 4; // How many 32-bit integers?
     
     /* The data store */
     cl_uint *data = new cl_uint[dataSize];
