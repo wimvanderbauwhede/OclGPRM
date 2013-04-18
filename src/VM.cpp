@@ -21,7 +21,8 @@
 
 const char *KERNEL_NAME = "vm";
 const char *KERNEL_FILE = "kernels/VM.cl";
-const char *KERNEL_BUILD_OPTIONS = "-I./include";
+const char *KERNEL_BUILD_OPTIONS = "-I/Users/wim/Git/OclGPRM/include/";// -I./include";
+
 
 const int NARGS = 3;
 const int NPACKET_SHIFT = ((NBYTES * 8) - 16);
@@ -35,7 +36,7 @@ std::deque<bytecode> readBytecode(char *bytecodeFile);
 std::deque< std::deque<bytecode> > words2Packets(std::deque<bytecode>& bytecodeWords);
 
 int main(int argc, char **argv) {
-  validateArguments(argc);
+  validateArguments(argc);//the host should truncate it to nunits!
 
   std::vector<cl::Platform> platforms;
   std::vector<cl::Device> devices;
@@ -70,6 +71,7 @@ int main(int argc, char **argv) {
 
     /* Get the max memory allocation size (in bytes) of the device */
     long maxGlobalAlloc = deviceInfo.global_mem_max_alloc_size(device);
+	unsigned int maxComputeUnits = deviceInfo.max_compute_units(device);
     
     /* Create a command queue for the device. */
     cl::CommandQueue commandQueue = cl::CommandQueue(context, device);
@@ -89,9 +91,15 @@ int main(int argc, char **argv) {
     cl::Kernel kernel(program, KERNEL_NAME);
     
     /* How many services are to be used? */
-    int nServices = 0;
+    unsigned int nServices = 0;
     std::stringstream(argv[2]) >> nServices;
-    
+
+    if (nServices < maxComputeUnits) {
+		std::cout << "INFO: Number of services (requested "<< nServices<<") is smaller than the number of compute units, "<<maxComputeUnits <<". The device will be under-utilised\n";
+//		nServices = maxComputeUnits;
+	} else if (nServices > maxComputeUnits) {
+		std::cout << "INFO: Number of services (requested "<< nServices<<") is larger than the number of compute units, "<<maxComputeUnits <<". This will work fine but you could try and let GPRM schedule \n";
+	}
     /* Calculate the number of queues we need. */
     int nQueues = nServices * nServices;
     
@@ -134,6 +142,7 @@ int main(int argc, char **argv) {
     }
     
     /* Create initial packet. */
+	// WV: note that nServices+1 is used as the final destination
     packet p = pkt_create(REFERENCE, nServices + 1, 0, 0, 1);
     queues[nQueues] = p;   // Initial packet.
     queues[0].x = 1 << 16; // Tail index is 1.
@@ -186,7 +195,7 @@ int main(int argc, char **argv) {
     
     /* Set the NDRange. */
     //ORIG cl::NDRange global(nServices), local(nServices);
-    cl::NDRange global(nServices), local(1); // means nServices compute units, one thread per unit
+    cl::NDRange global(nServices*NTH), local(NTH); // means nServices compute units, one thread per unit
 
     /* Run the kernel on NDRange until completion. */
     while (*state != COMPLETE) {

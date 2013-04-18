@@ -2,9 +2,9 @@
 #include "../tests/kerneltypes.h"
 #endif
 
-#include "./include/SharedMacros.h"
-#include "./include/SharedTypes.h"
-#include "./include/SystemConfiguration.h"
+#include "SharedMacros.h"
+#include "SharedTypes.h"
+#include "SystemConfiguration.h"
 
 #define RETURN_REL_PTR 0
 
@@ -94,7 +94,7 @@ uint parse_subtask(uint source,
                    __global bytecode *cStore,
                    __global subt *subt,
                    __global uint *data);
-uint service_compute(__global subt* subt, uint subtask,__global uint *data);
+__global void* service_compute(__global subt* subt, uint subtask,__global uint *data);
 bool computation_complete(__global packet *q, int n);
 
 void subt_store_symbol(bytecode payload, uint arg_pos, ushort i, __global subt *subt);
@@ -198,7 +198,9 @@ __global subt_rec *subt_get_rec(ushort i, __global subt *subt) {
   return &(subt->recs[i]);
 }
 
-// ---------------- KERNEL API ----------------
+// ------------------------------- GPRM KERNEL API -------------------------------
+// These functions are for use inside GPRM kernels
+//-------------------------------------------------------------------------------- 
 uint get_nargs( __global subt_rec *rec);
 uint is_quoted_ref(uint arg_pos, __global subt_rec *rec);
 
@@ -221,7 +223,7 @@ __global void *get_arg_value(uint arg_pos, __global subt_rec *rec, __global uint
 #if RETURN_REL_PTR == 1
   return data + value;
 #else
-  return value;
+  return (__global void *)value;
 #endif  
 }
 
@@ -231,30 +233,30 @@ __global void *get_arg_value(uint arg_pos, __global subt_rec *rec, __global uint
 
 __kernel void vm(__global packet *q,            /* Compute unit queues. */
                  __global packet *rq,           /* Transfer queues for READ state. */
-                 int n,                         /* The number of compute units. */
+                 int nservicenodes,             /* The number of service nodes. */
                  __global int *state,           /* Are we in the READ or WRITE state? */
                  __global bytecode *cStore,     /* The code store. */
                  __global subt *subt,           /* The subtask table. */
                  __global uint *data            /* Data memory for temporary results. */
                  ) {
   if (*state == WRITE) {
-    q_transfer(rq, q, n);
+    q_transfer(rq, q, nservicenodes);
     
     /* Synchronise the work items to ensure that all packets have transferred. */
     barrier(CLK_GLOBAL_MEM_FENCE);
 
-    if (computation_complete(q, n)) {
+    if (computation_complete(q, nservicenodes)) {
       *state = COMPLETE;
     }
   } else if (*state == READ) {
-    for (int i = 0; i < n; i++) {
+    for (int i = 0; i < nservicenodes; i++) {
       packet p;
-      while (q_read(&p, i, q, n)) {
-        parse_pkt(p, rq, n, cStore, subt, data);
+      while (q_read(&p, i, q, nservicenodes)) {
+        parse_pkt(p, rq, nservicenodes, cStore, subt, data);
       }
     }
   }
-}
+} // END of kernel code
 
 /* Is the entire computation complete? When all compute units are inactive (no packets in their queues)
    the computation is complete. */
@@ -277,6 +279,23 @@ void parse_pkt(packet p, __global packet *q, int n, __global bytecode *cStore, _
   uint arg_pos = pkt_get_arg_pos(p);
   uint subtask = pkt_get_sub(p);
   uint address = pkt_get_payload(p);
+/*
+	The GPRM uses one compute unit per service node and one thread per compute unit
+	However, the kernels can use all threads in a compute unit
+
+	Consequently, the number of service nodes is reflected by the number of work groups, not by the global_id
+	I guess I should restrict the VM's operations to a single thread by testing if ( th_id == 0 )
+	to save on global memory accesses.
+	I guess I don't need global_id in the VM
+	If a SNId is larger than the number of work groups, it should be modulo'ed; 
+	nservicenodes can be larger or smaller than the number of compute units. If it is smaller, the device is under-utilised;
+	if it is larger, the host should use nservicenodes as the NDRange instead of nunits.
+
+ */
+  size_t nunits = get_num_groups(0);	
+  size_t sn_id = get_group_id(0);
+  size_t th_id = get_local_id(0);
+  size_t gl_id = get_global_id(0);
 
   switch (type) {
   case ERROR:
@@ -288,10 +307,11 @@ void parse_pkt(packet p, __global packet *q, int n, __global bytecode *cStore, _
     
     if (subt_is_ready(ref_subtask, subt)) {
       /* Perform the computation. */
-      uint result = service_compute(subt, ref_subtask, data);
+      uint result = (uint)service_compute(subt, ref_subtask, data);
       
       /* Create a new packet containing the computation results. */
-      packet p = pkt_create(DATA, get_global_id(0), arg_pos, subtask, result);
+      //WV: ORIG packet p = pkt_create(DATA, get_global_id(0), arg_pos, subtask, result);
+      packet p = pkt_create(DATA, sn_id, arg_pos, subtask, result);
       
       /* Send the result back to the compute unit that sent the reference request. */
       q_write(p, source, q, n);
@@ -308,7 +328,7 @@ void parse_pkt(packet p, __global packet *q, int n, __global bytecode *cStore, _
 
     if (subt_is_ready(subtask, subt)) {
       /* Perform the computation. */
-      uint result = service_compute(subt, subtask, data);
+      uint result = (uint)service_compute(subt, subtask, data);
 
       /* Figure out where to send the result to. */
       __global subt_rec *rec = subt_get_rec(subtask, subt);
@@ -322,7 +342,7 @@ void parse_pkt(packet p, __global packet *q, int n, __global bytecode *cStore, _
       }
       
       /* Create and send new packet containing the computation results. */
-      packet p = pkt_create(DATA, get_global_id(0), return_as_pos, return_as_addr, result);
+      packet p = pkt_create(DATA, sn_id, return_as_pos, return_as_addr, result);
       q_write(p, return_to, q, n);
 
       /* Free up the subtask record so that it may be re-used. */
@@ -350,7 +370,7 @@ uint parse_subtask(uint source,                  /* The compute unit who sent th
   __global subt_rec *rec = subt_get_rec(av_index, subt);
 
   /* Get the K_S symbol from the code store. */
-  bytecode symbol = cStore[address * QUEUE_SIZE];
+  bytecode symbol = cStore[address * MAX_BYTECODE_SZ];
 
   /* Create a new subtask record. */
   uint service = symbol_get_service(symbol);
@@ -372,7 +392,7 @@ uint parse_subtask(uint source,                  /* The compute unit who sent th
     subt_rec_set_arg_status(rec, arg_pos, ABSENT);
 
     /* Get the next symbol (K_R or K_B) */
-    symbol = cStore[(address * QUEUE_SIZE) + arg_pos + 1];
+    symbol = cStore[(address * MAX_BYTECODE_SZ) + arg_pos + 1];
 
     switch (symbol_get_kind(symbol)) {
     case K_R:
@@ -408,7 +428,7 @@ uint parse_subtask(uint source,                  /* The compute unit who sent th
 
 /* Perform the computation represented by a subtask record and return a relative index
    to the result in the data buffer. */
-uint service_compute(__global subt* subt, uint subtask, __global uint *data) {
+__global void* service_compute(__global subt* subt, uint subtask, __global uint *data) {
   __global subt_rec *rec = subt_get_rec(subtask, subt);
   uint service_details = subt_rec_get_service_id(rec);
 
@@ -416,6 +436,8 @@ uint service_compute(__global subt* subt, uint subtask, __global uint *data) {
   uint class = symbol_get_SNCId(service_details);
   uint method = symbol_get_opcode(service_details);
   uint service = (library << 16) + (class << 8) + method;
+// ---------------- ---------------- GPRM KERNELS ---------------- ---------------- 
+// TODO: put these in separate files/functions, mimic OpenCL kernels more closely
 
   switch (service) {
   case M_OclGPRM_MAT_mult: {
@@ -524,10 +546,14 @@ uint service_compute(__global subt* subt, uint subtask, __global uint *data) {
   case M_OclGPRM_CTRL_begin: {
     uint nargs = get_nargs(rec);
     __global void* last_arg = get_arg_value(nargs-1, rec, data);
-    return last_arg    
+    return last_arg;
   }
 
   case M_OclGPRM_TEST_report: {
+	__global uint* res_array = get_arg_value(0, rec, data); 								  
+	uint idx = (uint)get_arg_value(1, rec, data); 	
+
+	return res_array;
   }
 /*
   case M_OclGPRM_CTRL_if: {
@@ -544,7 +570,8 @@ uint service_compute(__global subt* subt, uint subtask, __global uint *data) {
   }; // END of switch() of 
 
   return 0;
-}
+} // END of service_compute()
+// ---------------- ---------------- END OF GPRM KERNELS ---------------- ---------------- 
 
 /*********************************/
 /**** Subtask Table Functions ****/
@@ -699,7 +726,7 @@ void subt_rec_set_subt_status(__global subt_rec *r, uint status) {
 
 /* Set the subtask record nargs attribute. */
 void subt_rec_set_nargs(__global subt_rec *r, uint nargs) {
-  r->nargs = nargs
+  r->nargs = nargs;
 }
 
 /* Set the subtask record nargs_absent attribute. */
@@ -945,11 +972,11 @@ bool q_is_full(size_t id, size_t gid, __global packet *q, int n) {
 
 /* Return the size of the queue. */
 uint q_size(size_t id, size_t gid, __global packet *q, int n) {
-  if (q_is_full(id, gid, q, n)) return QUEUE_SIZE;
+  if (q_is_full(id, gid, q, n)) return MAX_BYTECODE_SZ;
   if (q_is_empty(id, gid, q, n)) return 0;
   uint head = q_get_head_index(id, gid, q, n);
   uint tail = q_get_tail_index(id, gid, q, n);
-  return (tail > head) ? (tail - head) : QUEUE_SIZE - head;
+  return (tail > head) ? (tail - head) : MAX_BYTECODE_SZ - head;
 }
 
 /* Read the value located at the head index of the queue into 'result'.
@@ -961,8 +988,8 @@ bool q_read(packet *result, size_t id, __global packet *q, int n) {
   }
 
   int index = q_get_head_index(gid, id, q, n);
-  *result = q[(n*n) + (gid * n * QUEUE_SIZE) + (id * QUEUE_SIZE) + index];
-  q_set_head_index((index + 1) % QUEUE_SIZE, gid, id, q, n);
+  *result = q[(n*n) + (gid * n * MAX_BYTECODE_SZ) + (id * MAX_BYTECODE_SZ) + index];
+  q_set_head_index((index + 1) % MAX_BYTECODE_SZ, gid, id, q, n);
   q_set_last_op(READ, gid, id, q, n);
   return true;
 }
@@ -976,8 +1003,8 @@ bool q_write(packet value, size_t id, __global packet *q, int n) {
   }
 
   int index = q_get_tail_index(id, gid, q, n);
-  q[(n*n) + (id * n * QUEUE_SIZE) + (gid * QUEUE_SIZE) + index] = value;
-  q_set_tail_index((index + 1) % QUEUE_SIZE, id, gid, q, n);
+  q[(n*n) + (id * n * MAX_BYTECODE_SZ) + (gid * MAX_BYTECODE_SZ) + index] = value;
+  q_set_tail_index((index + 1) % MAX_BYTECODE_SZ, id, gid, q, n);
   q_set_last_op(WRITE, id, gid, q, n);
   return true;
 }
@@ -1053,7 +1080,9 @@ void pkt_set_payload(packet *p, uint payload) {
   (*p).y = payload;
 }
 
-// ---------------- KERNEL API ----------------
+// ------------------------------- GPRM KERNEL API -------------------------------
+// These functions are for use inside GPRM kernels
+//-------------------------------------------------------------------------------- 
 
 uint get_nargs( __global subt_rec *rec) {
     return rec->nargs;
