@@ -97,7 +97,7 @@ int main(int argc, char **argv) {
     
     /* Calculate the memory required to store the queues. The first nQueue packets are used to store
        information regarding the queues themselves (head index, tail index and last operation performed). */
-    int qBufSize = (nQueues * QUEUE_SIZE) + nQueues;
+    int qBufSize = (nQueues * MAX_BYTECODE_SZ) + nQueues;
     
     /* Allocate memory for the queues. */
     packet *queues = new packet[qBufSize];
@@ -115,8 +115,8 @@ int main(int argc, char **argv) {
     int *state = new int;
     *state = READ;
 
-    /* The code store stores bytecode in QUEUE_SIZE chunks. */
-    bytecode *codeStore = new bytecode[CODE_STORE_SIZE * QUEUE_SIZE];
+    /* The code store stores bytecode in MAX_BYTECODE_SZ chunks. */
+    bytecode *codeStore = new bytecode[CODE_STORE_SIZE * MAX_BYTECODE_SZ];
     
     /* Read the bytecode from file. */
     std::deque<bytecode> bytecodeWords = readBytecode(argv[1]);
@@ -129,7 +129,7 @@ int main(int argc, char **argv) {
         bytecode word = *iterW;
         int packetN = iterP - packets.begin(); // Which packet?
         int wordN = iterW - packet.begin(); // Which word?
-        codeStore[((packetN + 1) * QUEUE_SIZE) + wordN] = word;
+        codeStore[((packetN + 1) * MAX_BYTECODE_SZ) + wordN] = word;
       }
     }
     
@@ -146,7 +146,7 @@ int main(int argc, char **argv) {
             maxGlobalAlloc 
             - 2* qBufSize * sizeof(packet) 
             - sizeof(int)
-            - CODE_STORE_SIZE * QUEUE_SIZE * sizeof(bytecode)
+            - CODE_STORE_SIZE * MAX_BYTECODE_SZ * sizeof(bytecode)
             - sizeof(subt)            
             ) / sizeof(cl_uint);// 4; // How many 32-bit integers?
     
@@ -166,8 +166,8 @@ int main(int argc, char **argv) {
     cl::Buffer stateBuffer = cl::Buffer(context, CL_MEM_READ_WRITE, sizeof(int));
     commandQueue.enqueueWriteBuffer(stateBuffer, CL_TRUE, 0, sizeof(int), state);
     
-    cl::Buffer codeStoreBuffer = cl::Buffer(context, CL_MEM_READ_ONLY, CODE_STORE_SIZE * QUEUE_SIZE * sizeof(bytecode));
-    commandQueue.enqueueWriteBuffer(codeStoreBuffer, CL_TRUE, 0, CODE_STORE_SIZE * QUEUE_SIZE * sizeof(bytecode), codeStore);
+    cl::Buffer codeStoreBuffer = cl::Buffer(context, CL_MEM_READ_ONLY, CODE_STORE_SIZE * MAX_BYTECODE_SZ * sizeof(bytecode));
+    commandQueue.enqueueWriteBuffer(codeStoreBuffer, CL_TRUE, 0, CODE_STORE_SIZE * MAX_BYTECODE_SZ * sizeof(bytecode), codeStore);
     
     cl::Buffer subtaskTableBuffer = cl::Buffer(context, CL_MEM_READ_WRITE, sizeof(subt));
     commandQueue.enqueueWriteBuffer(subtaskTableBuffer, CL_TRUE, 0, sizeof(subt), subtaskTable);

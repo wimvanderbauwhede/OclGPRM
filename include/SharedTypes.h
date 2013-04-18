@@ -29,13 +29,19 @@ typedef uint2 packet;
 typedef ulong bytecode;
 
 /* A subtask table record. */
+/* WV  
+ added nargs and code_address 
+*/
 typedef struct subt_rec {
   uint service_id;              // [32bits] Opcode.
-  bytecode args[QUEUE_SIZE];    // [64bits] Pointers to data or constants.
-  uchar arg_status[QUEUE_SIZE]; // [8bits]  The status of the arguments.
-  uchar subt_status;            // [4bits]  Subtask status and [4bits] number of args absent.
+  bytecode args[MAX_BYTECODE_SZ-1];    // [64bits] Pointers to data or constants.
+  uint code_addr; // address of the original bytecode
+  uchar arg_status[MAX_BYTECODE_SZ-1]; // [8bits]  The status of the arguments.
+  uchar nargs;
+  uchar subt_status;            // [8bits]: [4bits]  Subtask status and [4bits] number of args absent.  
   uchar return_to;              // [8bits]  The service core to return to.
-  ushort return_as;             // [8bits]  Subtask record address and [8bits] argument position.
+  ushort return_as;             // [16bits]: [8bits]  Subtask record address and [8bits] argument position.
+  uint padding; // what it says
 } subt_rec;
 
 /* The subtask table with associated available record stack. */

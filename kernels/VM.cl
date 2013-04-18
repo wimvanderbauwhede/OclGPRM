@@ -4,7 +4,7 @@
 
 #include "./include/SharedMacros.h"
 #include "./include/SharedTypes.h"
-#include "./include/Services.h"
+#include "./include/SystemConfiguration.h"
 
 #define RETURN_REL_PTR 0
 
@@ -111,7 +111,9 @@ uint subt_rec_get_service_id(__global subt_rec *r);
 bytecode subt_rec_get_arg(__global subt_rec *r, uint arg_pos);
 uint subt_rec_get_arg_status(__global subt_rec *r, uint arg_pos);
 uint subt_rec_get_subt_status(__global subt_rec *r);
+uint subt_rec_get_nargs(__global subt_rec *r);
 uint subt_rec_get_nargs_absent(__global subt_rec *r);
+uint subt_rec_get_code_addr(__global subt_rec *r);
 uint subt_rec_get_return_to(__global subt_rec *r);
 uint subt_rec_get_return_as(__global subt_rec *r);
 uint subt_rec_get_return_as_addr(__global subt_rec *r);
@@ -120,7 +122,9 @@ void subt_rec_set_service_id(__global subt_rec *r, uint service_id);
 void subt_rec_set_arg(__global subt_rec *r, uint arg_pos, bytecode arg);
 void subt_rec_set_arg_status(__global subt_rec *r, uint arg_pos, uint status);
 void subt_rec_set_subt_status(__global subt_rec *r, uint status);
+void subt_rec_set_nargs(__global subt_rec *r, uint n);
 void subt_rec_set_nargs_absent(__global subt_rec *r, uint n);
+void subt_rec_set_code_addr(__global subt_rec *r, uint return_to);
 void subt_rec_set_return_to(__global subt_rec *r, uint return_to);
 void subt_rec_set_return_as(__global subt_rec *r, uint return_as);
 void subt_rec_set_return_as_addr(__global subt_rec *r, uint return_as_addr);
@@ -184,9 +188,9 @@ void pkt_set_payload(packet *p, uint payload);
  * to do with the __global return value. By moving the function implementions
  * above functions that call them, I avoid requiring a function signature. It is messy
  * but its the only solution that works - I really don't see the conflict.
- 
-__global subt_rec *subt_get_rec(ushort i, __global subt *subt);
-__global void *get_arg_value(uint arg_pos, __global subt_rec *rec, __global uint *data);
+
+__global subt_rec* subt_get_rec(ushort i, __global subt *subt);
+__global void* get_arg_value(uint arg_pos, __global subt_rec *rec, __global uint *data);
 */
 
 /* Return the subtask record at index i in the subtask table. */
@@ -194,7 +198,13 @@ __global subt_rec *subt_get_rec(ushort i, __global subt *subt) {
   return &(subt->recs[i]);
 }
 
+// ---------------- KERNEL API ----------------
+uint get_nargs( __global subt_rec *rec);
+uint is_quoted_ref(uint arg_pos, __global subt_rec *rec);
+
+
 /* Get the argument value stored at 'arg_pos' from a subtask record. */
+// WV: with this signature, we return values as "__global void*", so we will need to cast them back later
 __global void *get_arg_value(uint arg_pos, __global subt_rec *rec, __global uint *data) {
   bytecode symbol = subt_rec_get_arg(rec, arg_pos);
   uint kind = symbol_get_kind(symbol);
@@ -345,8 +355,10 @@ uint parse_subtask(uint source,                  /* The compute unit who sent th
   /* Create a new subtask record. */
   uint service = symbol_get_service(symbol);
   uint nargs = symbol_get_nargs(symbol);
+
   subt_rec_set_service_id(rec, service);
   subt_rec_set_subt_status(rec, NEW);
+  subt_rec_set_nargs(rec, nargs);
   subt_rec_set_nargs_absent(rec, nargs);
   subt_rec_set_return_to(rec, source);
   subt_rec_set_return_as_addr(rec, subtask);
@@ -406,7 +418,7 @@ uint service_compute(__global subt* subt, uint subtask, __global uint *data) {
   uint service = (library << 16) + (class << 8) + method;
 
   switch (service) {
-  case M_OclGannet_MAT_mult: {
+  case M_OclGPRM_MAT_mult: {
     __global int *m1 = get_arg_value(0, rec, data); 
     __global int *m2 = get_arg_value(1, rec, data);
     __global uint *result = get_arg_value(2, rec, data);
@@ -432,7 +444,7 @@ uint service_compute(__global subt* subt, uint subtask, __global uint *data) {
     // It might be nicer to have (ptr) return an absolute pointer, so we can return absolute pointers
   }
 
-  case M_OclGannet_MAT_add: {
+  case M_OclGPRM_MAT_add: {
     __global int *m1 = get_arg_value(0, rec, data);
     __global int *m2 = get_arg_value(1, rec, data);
     __global uint *result = get_arg_value(2, rec, data);
@@ -452,8 +464,8 @@ uint service_compute(__global subt* subt, uint subtask, __global uint *data) {
     return result;
 #endif  
     }
-
-  case M_OclGannet_MAT_unit: {
+// Here we need  __global because we work on the pointer
+  case M_OclGPRM_MAT_unit: {
     __global uint *m = get_arg_value(0, rec, data);
     __global int *sz = get_arg_value(1, rec, data);
     int n = *sz;
@@ -470,16 +482,16 @@ uint service_compute(__global subt* subt, uint subtask, __global uint *data) {
 #endif      
   }
 
-  case M_OclGannet_MEM_ptr: {
+  case M_OclGPRM_MEM_ptr: {
     uint arg1 = (uint) get_arg_value(0, rec, data);
 #if RETURN_REL_PTR == 1
     return data[DATA_INFO_OFFSET + arg1];
 #else
-    return data + data[DATA_INFO_OFFSET + arg1];
+    return data + data[DATA_INFO_OFFSET + arg1]; // a pointer to the memory
 #endif    
   }
     
-  case M_OclGannet_MEM_const: {
+  case M_OclGPRM_MEM_const: {
     uint arg1 = (uint) get_arg_value(0, rec, data);
 #if RETURN_REL_PTR == 1
     return arg1 + DATA_INFO_OFFSET; // the index of the constant
@@ -488,7 +500,7 @@ uint service_compute(__global subt* subt, uint subtask, __global uint *data) {
 #endif    
   }
     
-  case M_OclGannet_REG_read: {
+  case M_OclGPRM_REG_read: {
     uint arg1 = (uint) get_arg_value(0, rec, data);
 #if RETURN_REL_PTR == 1
     return arg1 + DATA_INFO_OFFSET + BUFFER_PTR_FILE_SZ; // the index of the reg
@@ -497,7 +509,7 @@ uint service_compute(__global subt* subt, uint subtask, __global uint *data) {
 #endif    
   }
     
-  case M_OclGannet_REG_write: {
+  case M_OclGPRM_REG_write: {
     uint arg1 = (uint) get_arg_value(0, rec, data);
     uint arg2 = (uint) get_arg_value(1, rec, data);
     data[arg1 + DATA_INFO_OFFSET + BUFFER_PTR_FILE_SZ]=arg2;
@@ -507,8 +519,28 @@ uint service_compute(__global subt* subt, uint subtask, __global uint *data) {
     return data + arg1 + DATA_INFO_OFFSET + BUFFER_PTR_FILE_SZ; // a pointer to the reg
 #endif    
   }
-    
 
+// We assume every service returns a pointer
+  case M_OclGPRM_CTRL_begin: {
+    uint nargs = get_nargs(rec);
+    __global void* last_arg = get_arg_value(nargs-1, rec, data);
+    return last_arg    
+  }
+
+  case M_OclGPRM_TEST_report: {
+  }
+/*
+  case M_OclGPRM_CTRL_if: {
+    uint pred = (uint)get_arg_value(0, rec, data);
+    uint condval= pred & 0x1;
+    uint argidx= 2-condval;    
+    if (is_quoted_ref(argidx,rec)) {
+        dispatch_reference(argidx,rec,data);
+    } else {
+        return get_arg_value(argidx, rec, data);
+    }                                
+  }
+*/
   }; // END of switch() of 
 
   return 0;
@@ -609,6 +641,11 @@ uint subt_rec_get_subt_status(__global subt_rec *r) {
   return (r->subt_status & SUBTREC_STATUS_MASK) >> SUBTREC_STATUS_SHIFT;
 }
 
+/* Get the number of arguments from the subtask record. */
+uint subt_rec_get_nargs(__global subt_rec *r) {
+  return r->nargs;
+}
+
 /* Get the number of arguments absent in the subtask record. */
 uint subt_rec_get_nargs_absent(__global subt_rec *r) {
   return (r->subt_status & SUBTREC_NARGS_ABSENT_MASK);
@@ -622,6 +659,11 @@ uint subt_rec_get_return_to(__global subt_rec *r) {
 /* Get the subtask record return as attribute. */
 uint subt_rec_get_return_as(__global subt_rec *r) {
   return r->return_as;
+}
+
+/* Get the subtask record return as address. */
+uint subt_rec_get_code_addr(__global subt_rec *r) {
+  return r->code_addr;
 }
 
 /* Get the subtask record return as address. */
@@ -655,6 +697,11 @@ void subt_rec_set_subt_status(__global subt_rec *r, uint status) {
     | ((status << SUBTREC_STATUS_SHIFT) & SUBTREC_STATUS_MASK);
 }
 
+/* Set the subtask record nargs attribute. */
+void subt_rec_set_nargs(__global subt_rec *r, uint nargs) {
+  r->nargs = nargs
+}
+
 /* Set the subtask record nargs_absent attribute. */
 void subt_rec_set_nargs_absent(__global subt_rec *r, uint n) {
   r->subt_status = (r->subt_status & ~SUBTREC_NARGS_ABSENT_MASK)
@@ -669,6 +716,11 @@ void subt_rec_set_return_to(__global subt_rec *r, uint return_to) {
 /* Set the subtask record return_as attribute. */
 void subt_rec_set_return_as(__global subt_rec *r, uint return_as) {
   r->return_as = return_as;
+}
+
+/* Set the subtask record return_as address. */
+void subt_rec_set_code_addr(__global subt_rec *r, uint code_addr) {
+  r->code_addr= code_addr;
 }
 
 /* Set the subtask record return_as address. */
@@ -1000,3 +1052,17 @@ void pkt_set_payload_type(packet *p, uint ptype) {
 void pkt_set_payload(packet *p, uint payload) {
   (*p).y = payload;
 }
+
+// ---------------- KERNEL API ----------------
+
+uint get_nargs( __global subt_rec *rec) {
+    return rec->nargs;
+}
+
+uint is_quoted_ref(uint arg_pos, __global subt_rec *rec ) {
+  bytecode symbol = subt_rec_get_arg(rec, arg_pos);
+  uint kind = symbol_get_kind(symbol);
+  uint quoted = symbol_is_quoted(symbol);
+  return ((kind == K_R) && quoted == 1) ? 1 : 0;
+}
+        

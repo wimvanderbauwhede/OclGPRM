@@ -14,9 +14,9 @@ int tests_run = 0;
 /**************************/
 
 packet *q_create() {
-  packet *q = malloc((16 + (QUEUE_SIZE * 16)) * sizeof(packet));
+  packet *q = malloc((16 + (MAX_BYTECODE_SZ * 16)) * sizeof(packet));
   if (q) {
-    for (int i = 0; i < (16 + (QUEUE_SIZE * 16)); i++) {
+    for (int i = 0; i < (16 + (MAX_BYTECODE_SZ * 16)); i++) {
       q[i].x = 0;
       q[i].y = 0;
     }
@@ -35,7 +35,7 @@ subt_rec *subt_rec_create(uint service_id) {
     subt_rec_set_service_id(rec, service_id);
     subt_rec_set_subt_status(rec, NEW);
     
-    for (int i = 0; i < QUEUE_SIZE; i++) {
+    for (int i = 0; i < MAX_BYTECODE_SZ; i++) {
       subt_rec_set_arg(rec, i, 0);
     }
     

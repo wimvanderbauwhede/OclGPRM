@@ -3,11 +3,11 @@
 
 /* Contains MACRO definitions that are used by both the host and kernel programs. */
 
-#define QUEUE_SIZE 16
+#define MAX_BYTECODE_SZ 16
 #define COMPLETE -1
 #define READ 0
 #define WRITE 1
-#define CODE_STORE_SIZE (256 * QUEUE_SIZE)
+#define CODE_STORE_SIZE (256 * MAX_BYTECODE_SZ)
 #define SUBT_SIZE 1024
 #define DATA_INFO_OFFSET 1
 #define NBYTES 8 // Number of bytes in a bytecode word.
