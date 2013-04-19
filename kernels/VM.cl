@@ -1,6 +1,10 @@
 #ifdef KERNEL_TEST_ENABLED
 #include "../tests/kerneltypes.h"
 #endif
+ 
+#define DBG 1
+
+void report(__global uint*, uint);
 
 #include "SharedMacros.h"
 #include "SharedTypes.h"
@@ -239,15 +243,20 @@ __kernel void vm(__global packet *q,            /* Compute unit queues. */
                  __global subt *subt,           /* The subtask table. */
                  __global uint *data            /* Data memory for temporary results. */
                  ) {
-  if (*state == WRITE) {
-    q_transfer(rq, q, nservicenodes);
+ size_t th_id = get_local_id(0);
+  if (*state == WRITE) { 
+//      if (th_id==0) 
+        q_transfer(rq, q, nservicenodes);
     
     /* Synchronise the work items to ensure that all packets have transferred. */
+      // WV: don't see that this is needed if there is only one local thread
     barrier(CLK_GLOBAL_MEM_FENCE);
+// if (th_id==0) {
 
     if (computation_complete(q, nservicenodes)) {
       *state = COMPLETE;
     }
+// }
   } else if (*state == READ) {
     for (int i = 0; i < nservicenodes; i++) {
       packet p;
@@ -273,7 +282,7 @@ bool computation_complete(__global packet *q, int n) {
 }
 
 /* Inspect a packet and perform some action depending on its contents. */
-void parse_pkt(packet p, __global packet *q, int n, __global bytecode *cStore, __global subt *subt, __global uint *data) {
+void parse_pkt(packet p, __global packet *q, int nservicenodes, __global bytecode *cStore, __global subt *subt, __global uint *data) {
   uint type = pkt_get_type(p);
   uint source = pkt_get_source(p);
   uint arg_pos = pkt_get_arg_pos(p);
@@ -303,7 +312,7 @@ void parse_pkt(packet p, __global packet *q, int n, __global bytecode *cStore, _
 
   case REFERENCE: {
     /* Create a new subtask record */
-    uint ref_subtask = parse_subtask(source, arg_pos, subtask, address, q, n, cStore, subt, data);
+    uint ref_subtask = parse_subtask(source, arg_pos, subtask, address, q, nservicenodes, cStore, subt, data);
     
     if (subt_is_ready(ref_subtask, subt)) {
       /* Perform the computation. */
@@ -314,7 +323,7 @@ void parse_pkt(packet p, __global packet *q, int n, __global bytecode *cStore, _
       packet p = pkt_create(DATA, sn_id, arg_pos, subtask, result);
       
       /* Send the result back to the compute unit that sent the reference request. */
-      q_write(p, source, q, n);
+      q_write(p, source, q, nservicenodes);
 
       /* Free up the subtask record so that it may be re-used. */
       subt_cleanup(ref_subtask, subt);
@@ -337,13 +346,13 @@ void parse_pkt(packet p, __global packet *q, int n, __global bytecode *cStore, _
       uint return_as_pos = subt_rec_get_return_as_pos(rec);
 
       /* Initial reference packet doesn't need to send the result anyhere. It's in the data buffer. */
-      if (return_to == (n + 1)) {
+      if (return_to == RETURN_ADDRESS) { // WV: ORIG (n + 1)) {
         break;
       }
       
       /* Create and send new packet containing the computation results. */
       packet p = pkt_create(DATA, sn_id, return_as_pos, return_as_addr, result);
-      q_write(p, return_to, q, n);
+      q_write(p, return_to, q, nservicenodes);
 
       /* Free up the subtask record so that it may be re-used. */
       subt_cleanup(subtask, subt);
@@ -359,7 +368,7 @@ uint parse_subtask(uint source,                  /* The compute unit who sent th
                    uint subtask,                 /* The subtask record at which the result should be stored. */
                    uint address,                 /* The location of the bytecode in the code store. */
                    __global packet *q,
-                   int n,
+                   int nservicenodes,
                    __global bytecode *cStore,
                    __global subt *subt,
                    __global uint *data
@@ -397,17 +406,39 @@ uint parse_subtask(uint source,                  /* The compute unit who sent th
     switch (symbol_get_kind(symbol)) {
     case K_R:
       if (symbol_is_quoted(symbol)) {
+#ifdef DBG          
+          printf("Found quoted K_R: %d:%d:%d:%d, %d\n",                  
+                   symbol_get_SNId(symbol),
+ symbol_get_SNLId(symbol),
+ symbol_get_SNCId(symbol),
+ symbol_get_opcode(symbol),
+ symbol_get_address(symbol)
+ );
+#endif               
         subt_store_symbol(symbol, arg_pos, av_index, subt);
       } else {
+#ifdef DBG          
+          printf("Found unquoted K_R: %d:%d:%d:%d, %d\n",                  
+                   symbol_get_SNId(symbol),
+ symbol_get_SNLId(symbol),
+ symbol_get_SNCId(symbol),
+ symbol_get_opcode(symbol),
+ symbol_get_address(symbol)
+ );
+#endif          
         /* Create a packet to request a computation. */
         uint address = symbol_get_address(symbol);
-        packet p = pkt_create(REFERENCE, get_global_id(0), arg_pos, av_index, address);
+        packet p = pkt_create(REFERENCE, get_group_id(0), arg_pos, av_index, address);
 
         /* Find out which service should perform the computation. */
-        uint destination = symbol_get_SNId(symbol) - 1; // -1 as service 0 is not reserved for gateway.
-
+        uint snid = symbol_get_SNId(symbol);
+        
+        uint destination = (snid - 1);// % nservicenodes; // -1 as service 0 is not reserved for gateway.
+#ifdef DBG        
+         printf("%d %d\n",snid,destination);
+#endif         
         /* Send the packet and request the computation. */
-        q_write(p, destination, q, n);
+        q_write(p, destination, q, nservicenodes);
 
         /* Mark argument as requested. */
         subt_rec_set_arg_status(rec, arg_pos, REQUESTING);
@@ -415,6 +446,9 @@ uint parse_subtask(uint source,                  /* The compute unit who sent th
       break;
 
     case K_B:
+#ifdef DBG      
+      printf("Found K_B: %d\n",symbol_get_value(symbol));
+#endif      
       subt_store_symbol(symbol, arg_pos, av_index, subt);
       break;
     }
@@ -441,22 +475,34 @@ __global void* service_compute(__global subt* subt, uint subtask, __global uint 
 
   switch (service) {
   case M_OclGPRM_MAT_mult: {
-    __global int *m1 = get_arg_value(0, rec, data); 
-    __global int *m2 = get_arg_value(1, rec, data);
-    __global uint *result = get_arg_value(2, rec, data);
-    __global int *sz = get_arg_value(3, rec, data);
-    
-    int n = *sz;
+#ifdef DBG          
+          printf("Calling M_OclGPRM_MAT_mult, work group id = %d\n",get_group_id(0));
+#endif                                    
+    __global int *m1 = (__global int)get_arg_value(0, rec, data); 
+    __global int *m2 = (__global int)get_arg_value(1, rec, data);
+    __global int *result = (__global int)get_arg_value(2, rec, data);
+     uint sz = (uint)get_arg_value(3, rec, data);
+     printf("Got args for M_OclGPRM_MAT_mult, size = %d\n",sz);
+     printf("Mem addr m1 = 0x%X\n",m1);//-(__global int*)data);
+     printf("Mem addr m2 = 0x%X\n",m2);//-(__global int*)data);
+     printf("Mem addr result = 0x%X\n",result);//-(__global int*)data);
+
+    uint n = sz;
     for (int i = 0; i < n; i++) {
       for (int r = 0; r < n; r++) {
         int sum = 0;
         for (int c = 0; c < n; c++) {
-          sum += m1[i * n + c] * m2[c * n + r];
+          sum +=  m1[i * n + c] * m2[c * n + r];
         }
-	
-        *(result + (i * n + r)) = sum;
+// Following line segfaults!	
+//        *(result + (i * n + r)) = sum;
+        result[i*n+r] = sum;
       }
     }
+#ifdef DBG          
+          printf("Done M_OclGPRM_MAT_mult\n");
+#endif                                    
+    
 #if RETURN_REL_PTR == 1
     return result - data; // WV: returns a relative pointer, i.e. the index in the data array.
 #else
@@ -509,6 +555,10 @@ __global void* service_compute(__global subt* subt, uint subtask, __global uint 
 #if RETURN_REL_PTR == 1
     return data[DATA_INFO_OFFSET + arg1];
 #else
+#ifdef DBG
+    printf("Found pointer data[%d]=%d\n",DATA_INFO_OFFSET + arg1,data[DATA_INFO_OFFSET + arg1]);
+    printf("Mem addr = 0x%X + 0x%X = 0x%X\n",data , data[DATA_INFO_OFFSET + arg1],data + data[DATA_INFO_OFFSET + arg1]);
+#endif    
     return data + data[DATA_INFO_OFFSET + arg1]; // a pointer to the memory
 #endif    
   }
@@ -550,9 +600,9 @@ __global void* service_compute(__global subt* subt, uint subtask, __global uint 
   }
 
   case M_OclGPRM_TEST_report: {
-	__global uint* res_array = get_arg_value(0, rec, data); 								  
-	uint idx = (uint)get_arg_value(1, rec, data); 	
-
+	__global uint* res_array = get_arg_value(0, rec, data);
+    uint idx = (uint)get_arg_value(1, rec, data); 	
+    report(res_array,idx);
 	return res_array;
   }
 /*
@@ -982,7 +1032,7 @@ uint q_size(size_t id, size_t gid, __global packet *q, int n) {
 /* Read the value located at the head index of the queue into 'result'.
  * Returns true if succcessful (queue is not empty), false otherwise. */
 bool q_read(packet *result, size_t id, __global packet *q, int n) {
-  size_t gid = get_global_id(0);
+  size_t gid = get_group_id(0);
   if (q_is_empty(gid, id, q, n)) {
     return false;
   }
@@ -997,7 +1047,7 @@ bool q_read(packet *result, size_t id, __global packet *q, int n) {
 /* Write a value into the tail index of the queue.
  * Returns true if successful (queue is not full), false otherwise. */
 bool q_write(packet value, size_t id, __global packet *q, int n) {
-  size_t gid = get_global_id(0);
+  size_t gid = get_group_id(0);
   if (q_is_full(id, gid, q, n)) {
     return false;
   }
@@ -1093,5 +1143,12 @@ uint is_quoted_ref(uint arg_pos, __global subt_rec *rec ) {
   uint kind = symbol_get_kind(symbol);
   uint quoted = symbol_is_quoted(symbol);
   return ((kind == K_R) && quoted == 1) ? 1 : 0;
+}
+
+void report(__global uint* res_array, uint idx) {
+    res_array[4*idx+0]=get_global_id(0);
+    res_array[4*idx+1]=get_local_id(0);
+    res_array[4*idx+2]=get_group_id(0);
+    res_array[4*idx+3]=get_num_groups(0);
 }
         

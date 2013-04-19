@@ -2,7 +2,7 @@
 #define _SHAREDMACROS_H_
 
 /* Contains MACRO definitions that are used by both the host and kernel programs. */
-
+#define RETURN_ADDRESS 255
 #define MAX_BYTECODE_SZ 16
 #define COMPLETE -1
 #define READ 0

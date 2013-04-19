@@ -49,13 +49,15 @@ int main(int argc, char **argv) {
     /* Create a vector of available platforms. */
     cl::Platform::get(&platforms);
     
-    /* Create a vector of available devices (GPU Priority). */
+    /* Create a vector of available devices */
     try {
-      /* Use CPU for debugging */
-      // platforms[0].getDevices(CL_DEVICE_TYPE_CPU, &devices);
-      
-      /* Use GPU in practice. */
+#ifndef GPU              
+      /* Use CPU */
+      platforms[0].getDevices(CL_DEVICE_TYPE_CPU, &devices);
+#else      
+      /* Use GPU */
       platforms[0].getDevices(CL_DEVICE_TYPE_GPU, &devices);
+#endif      
     } catch (cl::Error error) {
       platforms[0].getDevices(CL_DEVICE_TYPE_CPU, &devices);
     }
@@ -85,13 +87,14 @@ int main(int argc, char **argv) {
     program = cl::Program(context, source);
     
     /* Build the program for the available devices. */
-    program.build(devices, KERNEL_BUILD_OPTIONS);
+    // WV: ORIG: program.build(devices, KERNEL_BUILD_OPTIONS);
+    program.build(devices, KERNEL_OPTS);
     
     /* Create the kernel. */
     cl::Kernel kernel(program, KERNEL_NAME);
     
     /* How many services are to be used? */
-    unsigned int nServices = 0;
+    unsigned int nServices = 1;
     std::stringstream(argv[2]) >> nServices;
 
     if (nServices < maxComputeUnits) {
@@ -142,8 +145,8 @@ int main(int argc, char **argv) {
     }
     
     /* Create initial packet. */
-	// WV: note that nServices+1 is used as the final destination
-    packet p = pkt_create(REFERENCE, nServices + 1, 0, 0, 1);
+	// WV: note that RETURN_ADDRESS is used as the final destination
+    packet p = pkt_create(REFERENCE, RETURN_ADDRESS, 0, 0, 1);
     queues[nQueues] = p;   // Initial packet.
     queues[0].x = 1 << 16; // Tail index is 1.
     queues[0].y = WRITE;   // Last operation is write.
@@ -158,12 +161,14 @@ int main(int argc, char **argv) {
             - CODE_STORE_SIZE * MAX_BYTECODE_SZ * sizeof(bytecode)
             - sizeof(subt)            
             ) / sizeof(cl_uint);// 4; // How many 32-bit integers?
-    
+    std::cout << "Size of data[]: "<< dataSize << " words\n";
     /* The data store */
     cl_uint *data = new cl_uint[dataSize];
     
     /* Users Write/allocate memory on the data buffer. */
-    populateData(data);
+    // WV: in many cases data depends on nServices
+    unsigned int allocated = populateData(data,nServices);
+    std::cout << "Buffers allocated in data[]: "<< allocated << " words\n";
     
     /* Create memory buffers on the device. */
     cl::Buffer qBuffer = cl::Buffer(context, CL_MEM_READ_WRITE, qBufSize * sizeof(packet));

@@ -1,7 +1,7 @@
 /* As a user you are required to implement the populateData(cl_uint *data) function
    which is used to populate the data store with input data and allocate memory for results. */
 #include "UserData.h"
-#include "SharedMacros.h"
+//#include "SharedMacros.h"
 #include <ctime>
 #include <iostream>
 
@@ -13,9 +13,25 @@
 int randomNumber(int max) {
   return (rand() % (max + 1));
 }
-#if EX == 4
+
+#if EX == 5
+unsigned populateData(cl_uint *data, unsigned int nServices) {
+
+  // number of I/O registers used
+  unsigned int n_io_regs = 1;
+
+  data[0] = n_io_regs;
+  /* Pointers to allocated memory. */
+  // WV start of memory area allocated for I/O buffers
+  data[1] = BUFFER_PTR_FILE_SZ + REGISTER_FILE_SZ; // reg 0
+  data[n_io_regs + 1] = data[1] + (nServices*4); // Pointer to scratch free/scratch memory.
+    return  data[n_io_regs + 1];
+
+}
+
+#elif EX == 4
 /* Populates the data store with the data needed for execute example 4. */
-void populateData(cl_uint *data) {
+unsigned int populateData(cl_uint *data, unsigned int nServices) {
   /* Initialise seed for random number generation. */
   srand(1);
 
@@ -58,10 +74,12 @@ void populateData(cl_uint *data) {
   data[data[2] + 1] = 4;
   data[data[2] + 2] = 7;
   data[data[2] + 3] = 1;
+    return  data[n_io_regs + 1];
+
 }
 #elif EX == 1
 /* Replace populateData with this one to run example 1. */
-void populateData(cl_uint *data) {
+unsigned int populateData(cl_uint *data, unsigned int nServices) {
   /* Initialise seed for random number generation. */
   srand(1);
   
@@ -72,7 +90,7 @@ void populateData(cl_uint *data) {
   data[0] = n_io_regs;
   
   /* Pointers to allocated memory. */
-  data[1] =  BUFFER_PTR_FILE_SZ + REGISTER_FILE_SZ;
+  data[1] = BUFFER_PTR_FILE_SZ + REGISTER_FILE_SZ;
   data[2] = data[1] + (dim * dim);
   data[3] = data[2] + (dim * dim);
   
@@ -88,5 +106,6 @@ void populateData(cl_uint *data) {
   for (uint i = data[2]; i < data[3]; i++) {
     data[i] = randomNumber(10);
   }
+  return  data[n_io_regs + 1];
 }
 #endif
