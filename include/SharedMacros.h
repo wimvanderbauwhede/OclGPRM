@@ -3,12 +3,16 @@
 
 /* Contains MACRO definitions that are used by both the host and kernel programs. */
 #define RETURN_ADDRESS 255
-#define MAX_BYTECODE_SZ 16
+
+// States
 #define COMPLETE -1
 #define READ 0
 #define WRITE 1
+// Sizes
+#define MAX_BYTECODE_SZ 16
 #define CODE_STORE_SIZE (256 * MAX_BYTECODE_SZ)
 #define SUBT_SIZE 1024
+// Various
 #define DATA_INFO_OFFSET 1
 #define NBYTES 8 // Number of bytes in a bytecode word.
 

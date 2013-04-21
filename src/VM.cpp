@@ -96,7 +96,7 @@ int main(int argc, char **argv) {
     /* How many services are to be used? */
     unsigned int nServices = 1;
     std::stringstream(argv[2]) >> nServices;
-
+	std::cout << "INFO: Device is " << ((deviceInfo.is_little_endian(device))? "LITTLE" : "BIG") <<"-endian\n";
     if (nServices < maxComputeUnits) {
 		std::cout << "INFO: Number of services (requested "<< nServices<<") is smaller than the number of compute units, "<<maxComputeUnits <<". The device will be under-utilised\n";
 //		nServices = maxComputeUnits;

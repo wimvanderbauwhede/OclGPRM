@@ -2,6 +2,44 @@
 #include "../tests/kerneltypes.h"
 #endif
  
+/*
+NOTES:
+
+- Somehow, example 1 only works with *exactly* 2 services on the GPU, even if we need only 1
+- At the moment, the type of data[] is uint, need to make sure int/float/double work!
+
+I want to return absolute pointers from the services, so the return value should be
+
+__global uint*
+
+On the other hand, get_arg_value should preferably return an index into data[],
+so that I don't have to do
+
+&data[((uint)get_arg_value(0, rec, data)-(uint)data)>>2]
+
+but simply
+
+&data[get_arg_value(0, rec, data)]
+
+That means that get_arg_value will get the index from the pointer, so I should do
+
+(value-(uint)data)>>2
+
+But of course only if value is a pointer! Otherwise, I should return just value
+
+This convoluted approach is needed because somehow
+
+__global int* m = get_arg_value(); 
+m[0]=0;
+
+does not work, but
+
+__global int* m = &data[((uint)get_arg_value()-(uint)data)>>2];
+
+does work. Which means that the latter aliases, but the former does not.
+
+
+ */
 #define DBG 1
 
 void report(__global uint*, uint);
@@ -98,7 +136,7 @@ uint parse_subtask(uint source,
                    __global bytecode *cStore,
                    __global subt *subt,
                    __global uint *data);
-__global void* service_compute(__global subt* subt, uint subtask,__global uint *data);
+ulong service_compute(__global subt* subt, uint subtask,__global uint *data);
 bool computation_complete(__global packet *q, int n);
 
 void subt_store_symbol(bytecode payload, uint arg_pos, ushort i, __global subt *subt);
@@ -194,7 +232,7 @@ void pkt_set_payload(packet *p, uint payload);
  * but its the only solution that works - I really don't see the conflict.
 
 __global subt_rec* subt_get_rec(ushort i, __global subt *subt);
-__global void* get_arg_value(uint arg_pos, __global subt_rec *rec, __global uint *data);
+__global uint* get_arg_value(uint arg_pos, __global subt_rec *rec, __global uint *data);
 */
 
 /* Return the subtask record at index i in the subtask table. */
@@ -210,16 +248,35 @@ uint is_quoted_ref(uint arg_pos, __global subt_rec *rec);
 
 
 /* Get the argument value stored at 'arg_pos' from a subtask record. */
-// WV: with this signature, we return values as "__global void*", so we will need to cast them back later
-__global void *get_arg_value(uint arg_pos, __global subt_rec *rec, __global uint *data) {
+// In the case of a (quoted) K_R symbol, we need to return the actual symbol
+// Note that we return indices into the data[] array, not absolute pointers, so the ulong type is fine
+ulong get_arg_value(uint arg_pos, __global subt_rec *rec, __global uint *data) {
   bytecode symbol = subt_rec_get_arg(rec, arg_pos);
   uint kind = symbol_get_kind(symbol);
   uint value = symbol_get_value(symbol);
   
   if (kind == K_R) {
-    return ((__global void *) symbol);
+	  // clearly, this is a problem: symbols are 64-bit
+	// We can only get the 32-bit Name in this way!
+	  // So maybe get_arg_value should be 64-bit
+    return symbol;   
+  } else if (kind == K_B || kind == K_P) {
+    return value;
+  }
+  // If we don't know the kind, return the entire symbol
+  return symbol;
+
+} // END of get_arg_value()
+
+__global uint *get_arg_value_OLD(uint arg_pos, __global subt_rec *rec, __global uint *data) {
+  bytecode symbol = subt_rec_get_arg(rec, arg_pos);
+  uint kind = symbol_get_kind(symbol);
+  uint value = symbol_get_value(symbol);
+  
+  if (kind == K_R) {
+    return ((__global uint *) symbol);
   } else if (kind == K_B) {
-    return ((__global void *) value);
+    return ((__global uint *) value);
   }
 
   // K_P symbol - Value is a pointer, actual arg in data buffer.
@@ -227,7 +284,7 @@ __global void *get_arg_value(uint arg_pos, __global subt_rec *rec, __global uint
 #if RETURN_REL_PTR == 1
   return data + value;
 #else
-  return (__global void *)value;
+  return (__global uint *)value;
 #endif  
 }
 
@@ -237,7 +294,7 @@ __global void *get_arg_value(uint arg_pos, __global subt_rec *rec, __global uint
 
 __kernel void vm(__global packet *q,            /* Compute unit queues. */
                  __global packet *rq,           /* Transfer queues for READ state. */
-                 int nservicenodes,             /* The number of service nodes. */
+                 uint nservicenodes,             /* The number of service nodes. */
                  __global int *state,           /* Are we in the READ or WRITE state? */
                  __global bytecode *cStore,     /* The code store. */
                  __global subt *subt,           /* The subtask table. */
@@ -316,12 +373,30 @@ void parse_pkt(packet p, __global packet *q, int nservicenodes, __global bytecod
     
     if (subt_is_ready(ref_subtask, subt)) {
       /* Perform the computation. */
-      uint result = (uint)service_compute(subt, ref_subtask, data);
-      
+      ulong result = service_compute(subt, ref_subtask, data);
+      // In principle, result is a 64-bit integer as it could be a symbol
+
+	  // In practice, the only case when we need more than 32 bits is K_R
+	  // 32 bits are used for the Name (SNId:SCLId:SCId:Opcode) and another 16 (?) for the subtask
+	  
+	  // But as far as I remember, we never actually _return_ a K_R
+	  // So 32 bits should do (provided we limit data[] to 4G 32-bit words
       /* Create a new packet containing the computation results. */
       //WV: ORIG packet p = pkt_create(DATA, get_global_id(0), arg_pos, subtask, result);
-      packet p = pkt_create(DATA, sn_id, arg_pos, subtask, result);
-      
+      packet p = pkt_create(DATA, sn_id, arg_pos, subtask, (uint)result);
+
+	  //WV: for dispatching a quoted K_R, we need
+	  
+	  // packet p = pkt_create(REFERENCE, sn_id, arg_idx, ref_subtask, code_addr);
+	  // Also, we need to avoid cleanup.
+	  // The code_addr size is 10 bits;
+	  // say 4 bits for the core status
+	  // 4 bits for the arg_idx
+	  // also need to have the destination, 8 bits
+	  // altogether 10 + 4 + 4 + 8 = 26 bits
+      // So, I guess what I will do is return the K_R symbol, 
+	  // so 10 + 8 bits are definitely in the right place
+	  // Then I can replace the opcode by the arg_idx and the core_status.
       /* Send the result back to the compute unit that sent the reference request. */
       q_write(p, source, q, nservicenodes);
 
@@ -337,7 +412,7 @@ void parse_pkt(packet p, __global packet *q, int nservicenodes, __global bytecod
 
     if (subt_is_ready(subtask, subt)) {
       /* Perform the computation. */
-      uint result = (uint)service_compute(subt, subtask, data);
+      ulong result = service_compute(subt, subtask, data);
 
       /* Figure out where to send the result to. */
       __global subt_rec *rec = subt_get_rec(subtask, subt);
@@ -351,7 +426,7 @@ void parse_pkt(packet p, __global packet *q, int nservicenodes, __global bytecod
       }
       
       /* Create and send new packet containing the computation results. */
-      packet p = pkt_create(DATA, sn_id, return_as_pos, return_as_addr, result);
+      packet p = pkt_create(DATA, sn_id, return_as_pos, return_as_addr, (uint)result);
       q_write(p, return_to, q, nservicenodes);
 
       /* Free up the subtask record so that it may be re-used. */
@@ -433,9 +508,9 @@ uint parse_subtask(uint source,                  /* The compute unit who sent th
         /* Find out which service should perform the computation. */
         uint snid = symbol_get_SNId(symbol);
         
-        uint destination = (snid - 1);// % nservicenodes; // -1 as service 0 is not reserved for gateway.
+        uint destination = (snid - 1) % nservicenodes; // -1 as service 0 is not reserved for gateway.
 #ifdef DBG        
-         printf("%d %d\n",snid,destination);
+         printf("(%d - 1) mod %d = %d\n",snid,nservicenodes,destination);
 #endif         
         /* Send the packet and request the computation. */
         q_write(p, destination, q, nservicenodes);
@@ -462,7 +537,7 @@ uint parse_subtask(uint source,                  /* The compute unit who sent th
 
 /* Perform the computation represented by a subtask record and return a relative index
    to the result in the data buffer. */
-__global void* service_compute(__global subt* subt, uint subtask, __global uint *data) {
+ulong service_compute(__global subt* subt, uint subtask, __global uint *data) {
   __global subt_rec *rec = subt_get_rec(subtask, subt);
   uint service_details = subt_rec_get_service_id(rec);
 
@@ -478,24 +553,31 @@ __global void* service_compute(__global subt* subt, uint subtask, __global uint 
 #ifdef DBG          
           printf("Calling M_OclGPRM_MAT_mult, work group id = %d\n",get_group_id(0));
 #endif                                    
-    __global int *m1 = (__global int)get_arg_value(0, rec, data); 
-    __global int *m2 = (__global int)get_arg_value(1, rec, data);
-    __global int *result = (__global int)get_arg_value(2, rec, data);
+    __global uint *m1 = &data[get_arg_value(0, rec, data)]; 
+    __global uint *m2 = &data[get_arg_value(1, rec, data)]; 
+	ulong res_idx = get_arg_value(2, rec, data);
+    __global uint *result = &data[res_idx]; 
      uint sz = (uint)get_arg_value(3, rec, data);
+#ifdef DBG          
      printf("Got args for M_OclGPRM_MAT_mult, size = %d\n",sz);
-     printf("Mem addr m1 = 0x%X\n",m1);//-(__global int*)data);
-     printf("Mem addr m2 = 0x%X\n",m2);//-(__global int*)data);
-     printf("Mem addr result = 0x%X\n",result);//-(__global int*)data);
+	 
+     printf("Mem addr m1 = 0x%X - 0x%X = 0x%X\n",m1,data,((uint)m1-(uint)data));
+	      printf("Mem addr check = 0x%X\n",data[1]);
 
+	printf("m1[0]=%d\n",data[data[1]]);
+	 printf("m1[0]=%d\n",data[((uint)m1-(uint)data)>>2]); // i.e. data+((m1-data)>>2) or data + m1>>2 - data>>2
+	
+	 printf("m1=0x%X\n",m1);
+     printf("Mem addr m2 = 0x%X\n",((uint)m2-(uint)data));
+     printf("Mem addr result = 0x%X\n",((uint)result-(uint)data));
+#endif	 
     uint n = sz;
     for (int i = 0; i < n; i++) {
       for (int r = 0; r < n; r++) {
-        int sum = 0;
+        uint sum = 0;
         for (int c = 0; c < n; c++) {
           sum +=  m1[i * n + c] * m2[c * n + r];
         }
-// Following line segfaults!	
-//        *(result + (i * n + r)) = sum;
         result[i*n+r] = sum;
       }
     }
@@ -503,120 +585,109 @@ __global void* service_compute(__global subt* subt, uint subtask, __global uint 
           printf("Done M_OclGPRM_MAT_mult\n");
 #endif                                    
     
-#if RETURN_REL_PTR == 1
-    return result - data; // WV: returns a relative pointer, i.e. the index in the data array.
-#else
-    return result;
-#endif    
-    // This is because (ptr ) returns a relative pointer. 
-    // It might be nicer to have (ptr) return an absolute pointer, so we can return absolute pointers
+    return res_idx;
   }
 
   case M_OclGPRM_MAT_add: {
-    __global int *m1 = get_arg_value(0, rec, data);
-    __global int *m2 = get_arg_value(1, rec, data);
-    __global uint *result = get_arg_value(2, rec, data);
-    __global int *sz = get_arg_value(3, rec, data);
-    int n = *sz;
+#ifdef DBG          
+          printf("Calling M_OclGPRM_MAT_add, work group id = %d\n",get_group_id(0));
+#endif                                    
+							  
+    ulong m1_idx = get_arg_value(0, rec, data);
+    ulong m2_idx = get_arg_value(1, rec, data);
+    ulong result_idx = get_arg_value(2, rec, data);
+    uint sz = (uint)get_arg_value(3, rec, data);
+    uint n = sz;
+	__global uint* m1 = &data[m1_idx];
+	__global uint* m2 = &data[m2_idx];
+	__global uint* result = &data[result_idx];
     
     for (int row = 0; row < n; row++) {
       for (int col = 0; col < n; col++) {
-        int sum = m1[row * n + col] + m2[row * n + col];
-        *(result + (row * n + col)) = sum;
+        uint sum = m1[row * n + col] + m2[row * n + col];
+        result[row * n + col] = sum;
       }
     }
 
-#if RETURN_REL_PTR == 1
-    return result - data; // WV: returns a relative pointer, i.e. the index in the data array.
-#else
-    return result;
-#endif  
+    return result_idx;
     }
-// Here we need  __global because we work on the pointer
-  case M_OclGPRM_MAT_unit: {
-    __global uint *m = get_arg_value(0, rec, data);
-    __global int *sz = get_arg_value(1, rec, data);
-    int n = *sz;
 
+  case M_OclGPRM_MAT_unit: {
+#ifdef DBG          
+          printf("Calling M_OclGPRM_MAT_unit, work group id = %d\n",get_group_id(0));
+#endif                                    
+    ulong m_idx= get_arg_value(0, rec, data);
+    uint sz = (uint)get_arg_value(1, rec, data);
+    uint n = sz;
+	__global uint* m = &data[m_idx];
     for (int i = 0; i < n; i++) {
       for (int j = 0; j < n; j++) {
         *(m + (i * n + j)) = (i == j) ? 1 : 0;
       }
     }
-#if RETURN_REL_PTR == 1
-    return m - data; // WV: returns a relative pointer, i.e. the index in the data array.
-#else
-    return m; // 
-#endif      
+    return m_idx; // 
   }
 
   case M_OclGPRM_MEM_ptr: {
-    uint arg1 = (uint) get_arg_value(0, rec, data);
-#if RETURN_REL_PTR == 1
+    ulong arg1 = (uint) get_arg_value(0, rec, data);
     return data[DATA_INFO_OFFSET + arg1];
-#else
+	/*
 #ifdef DBG
     printf("Found pointer data[%d]=%d\n",DATA_INFO_OFFSET + arg1,data[DATA_INFO_OFFSET + arg1]);
-    printf("Mem addr = 0x%X + 0x%X = 0x%X\n",data , data[DATA_INFO_OFFSET + arg1],data + data[DATA_INFO_OFFSET + arg1]);
+    printf("Mem addr = 0x%X + 0x%X = 0x%X\n",data , data[DATA_INFO_OFFSET + arg1]<<2,data + data[DATA_INFO_OFFSET + arg1]);
+	data[ data[DATA_INFO_OFFSET + arg1] ] =557188;
 #endif    
-    return data + data[DATA_INFO_OFFSET + arg1]; // a pointer to the memory
-#endif    
+    //return (__global uint*)((uint)data + (data[DATA_INFO_OFFSET + arg1]<<2)); // a pointer to the memory
+    return (__global uint*)(&data[ data[DATA_INFO_OFFSET + arg1] ]); // a pointer to the memory
+#endif
+*/
   }
     
   case M_OclGPRM_MEM_const: {
-    uint arg1 = (uint) get_arg_value(0, rec, data);
-#if RETURN_REL_PTR == 1
-    return arg1 + DATA_INFO_OFFSET; // the index of the constant
-#else    
-    return data + arg1 + DATA_INFO_OFFSET; // a pointer to the constant
-#endif    
+    ulong arg1 = get_arg_value(0, rec, data);
+    return data[arg1 + DATA_INFO_OFFSET]; // the actual constant
   }
     
   case M_OclGPRM_REG_read: {
-    uint arg1 = (uint) get_arg_value(0, rec, data);
-#if RETURN_REL_PTR == 1
-    return arg1 + DATA_INFO_OFFSET + BUFFER_PTR_FILE_SZ; // the index of the reg
-#else    
-    return data + arg1 + DATA_INFO_OFFSET + BUFFER_PTR_FILE_SZ; // a pointer to the reg
-#endif    
+    ulong arg1 = get_arg_value(0, rec, data);
+    return data[arg1 + DATA_INFO_OFFSET + BUFFER_PTR_FILE_SZ]; // the value stored in the reg
   }
     
   case M_OclGPRM_REG_write: {
-    uint arg1 = (uint) get_arg_value(0, rec, data);
-    uint arg2 = (uint) get_arg_value(1, rec, data);
+    ulong arg1 = get_arg_value(0, rec, data);
+    ulong arg2 = get_arg_value(1, rec, data);
     data[arg1 + DATA_INFO_OFFSET + BUFFER_PTR_FILE_SZ]=arg2;
-#if RETURN_REL_PTR == 1
-    return arg1 + DATA_INFO_OFFSET + BUFFER_PTR_FILE_SZ; // the index of the reg
-#else    
-    return data + arg1 + DATA_INFO_OFFSET + BUFFER_PTR_FILE_SZ; // a pointer to the reg
-#endif    
+    return arg2; // the value just written
   }
 
 // We assume every service returns a pointer
   case M_OclGPRM_CTRL_begin: {
-    uint nargs = get_nargs(rec);
-    __global void* last_arg = get_arg_value(nargs-1, rec, data);
+    ulong nargs = get_nargs(rec);
+    ulong last_arg = get_arg_value(nargs-1, rec, data);
     return last_arg;
   }
 
   case M_OclGPRM_TEST_report: {
-	__global uint* res_array = get_arg_value(0, rec, data);
-    uint idx = (uint)get_arg_value(1, rec, data); 	
-    report(res_array,idx);
+	ulong res_array = get_arg_value(0, rec, data); // idx into data[]
+    ulong  idx = get_arg_value(1, rec, data); 	
+	// report takes an absolute pointer
+    report(&data[res_array],idx);
 	return res_array;
   }
-/*
+
   case M_OclGPRM_CTRL_if: {
     uint pred = (uint)get_arg_value(0, rec, data);
     uint condval= pred & 0x1;
     uint argidx= 2-condval;    
     if (is_quoted_ref(argidx,rec)) {
-        dispatch_reference(argidx,rec,data);
+        ulong ref_symbol=get_arg_value(argidx, rec, data);
+		ref_symbol= (ref_symbol & 0xFFFFFFFFFFFFFF00) +(argidx<<4)+1;
+		return ref_symbol;
     } else {
         return get_arg_value(argidx, rec, data);
     }                                
   }
-*/
+
   }; // END of switch() of 
 
   return 0;
