@@ -19,18 +19,18 @@
 #define M_OclGPRM_MEM_const 65794
 #define M_OclGPRM_REG_write 67073
 #define M_OclGPRM_REG_read 67074
+#define M_OclGPRM_CTRL_begin 66561
+#define M_OclGPRM_CTRL_if 66562
 #define M_OclGPRM_MAT_mult 66049
 #define M_OclGPRM_MAT_add 66050
 #define M_OclGPRM_MAT_sub 66051
 #define M_OclGPRM_MAT_unit 66052
 #define M_OclGPRM_MAT_det 66053
 #define M_OclGPRM_MAT_trans 66054
-#define M_OclGPRM_CTRL_begin 66561
-#define M_OclGPRM_CTRL_if 66562
 
 #define S_OclGPRM_REG 5
-#define S_OclGPRM_MEM 1
-#define S_OclGPRM_CTRL 2
+#define S_OclGPRM_CTRL 1
+#define S_OclGPRM_MEM 2
 
 #define SC_OclGPRM_TEST 261
 #define SC_OclGPRM_LET 259

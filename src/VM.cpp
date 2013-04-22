@@ -21,7 +21,8 @@
 
 const char *KERNEL_NAME = "vm";
 const char *KERNEL_FILE = "kernels/VM.cl";
-const char *KERNEL_BUILD_OPTIONS = "-I/Users/wim/Git/OclGPRM/include/";// -I./include";
+// WV: use KERNEL_OPTS from build system
+//const char *KERNEL_BUILD_OPTIONS = "-I/Users/wim/Git/OclGPRM/include/";// -I./include";
 
 
 const int NARGS = 3;
@@ -203,11 +204,18 @@ int main(int argc, char **argv) {
     cl::NDRange global(nServices*NTH), local(NTH); // means nServices compute units, one thread per unit
 
     /* Run the kernel on NDRange until completion. */
-    while (*state != COMPLETE) {
+	int iter=0;
+    while (*state != COMPLETE ) {
+#ifdef OCLDBG	  
+	  std::cout << "\n *** CALL TO DEVICE " << iter << " *** \n";
+#endif	  
       commandQueue.enqueueNDRangeKernel(kernel, cl::NullRange, global, local);
       commandQueue.finish();
-	  std::cout << "\n *** CONTROL TO CPU *** \n";
+#ifdef OCLDBG	  
+//	  std::cout << "\n *** CONTROL BACK TO HOST *** \n";
+#endif	  
       toggleState(commandQueue, stateBuffer, state);
+	  iter++;
     }
     
     commandQueue.finish();
@@ -276,9 +284,12 @@ std::deque<bytecode> readBytecode(char *bytecodeFile) {
     while (f.good()) {
       bytecode word = 0;
       for (int i = 0; i < NBYTES; i++) {
-        char c = f.get();
-        word = (word << NBYTES) + c;
+        unsigned char c = f.get();
+        word = (word << NBYTES) + (bytecode)c;
       }
+//	  std::cout << "WORD: "<< word << "\t";
+//	  std::cout << "VAL: "<< (word & 0xFFFFULL) << "\n";
+
       bytecodeWords.push_back(word);
     }
   }
@@ -291,6 +302,7 @@ std::deque< std::deque<bytecode> > words2Packets(std::deque<bytecode>& bytecodeW
   int nPackets = bytecodeWords.front() >> NPACKET_SHIFT; bytecodeWords.pop_front();
   std::deque< std::deque<bytecode> > packets;
   for (int p = 0; p < nPackets; p++) {
+//	  std::cout << "PACKET: "<<p<<"\n";
     std::deque<bytecode> packet;
 
     int length = 0;
@@ -304,7 +316,10 @@ std::deque< std::deque<bytecode> > words2Packets(std::deque<bytecode>& bytecodeW
 
     for (int i = 0; i < length; i++) {
       bytecode payloadWord = bytecodeWords.front();
-      bytecodeWords.pop_front();
+//	  std::cout << "SYM: "<< payloadWord << "\t";
+//	  std::cout << "VAL: "<< (payloadWord & 0xFFFFFFFFULL) << "\n";
+
+      bytecodeWords.pop_front();	  
       packet.push_back(payloadWord);
     }
 

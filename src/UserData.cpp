@@ -83,7 +83,7 @@ unsigned int populateData(cl_uint *data, unsigned int nServices) {
   /* Initialise seed for random number generation. */
   srand(1);
   
-  int dim = 1024; // N rows of a square matrix.
+  int dim = 128;//1024; // N rows of a square matrix.
   
   /* Total number of memory sections allocated. */
    unsigned int n_io_regs = 3;

@@ -5,21 +5,11 @@
 /*
 NOTES:
 
-- Somehow, example 1 only works with *exactly* 2 services on the GPU, even if we need only 1
-- At the moment, the type of data[] is uint, need to make sure int/float/double work!
+Now that it works on multiple threads, it completely hangs on the GPU ...
 
-
-The idea is:
-@WG SRC, 
-1. write into OUT queue for DEST, i.e. q_out[SRC][DEST]
-2. transfer into IN queue of DEST at location SRC i.e. q_in[DEST][SRC]
-
-So we need 
-q_write(node_id,q_id)
-q_read(node_id,q_id)
-
+One reason was clearly the break; the other is that somehow K_B are read incorrectly!
  */
-#define DBG 0
+
 
 void report(__global uint*, uint);
 
@@ -247,25 +237,6 @@ ulong get_arg_value(uint arg_pos, __global subt_rec *rec, __global uint *data) {
 
 } // END of get_arg_value()
 
-__global uint *get_arg_value_OLD(uint arg_pos, __global subt_rec *rec, __global uint *data) {
-  bytecode symbol = subt_rec_get_arg(rec, arg_pos);
-  uint kind = symbol_get_kind(symbol);
-  uint value = symbol_get_value(symbol);
-  
-  if (kind == K_R) {
-    return ((__global uint *) symbol);
-  } else if (kind == K_B) {
-    return ((__global uint *) value);
-  }
-
-  // K_P symbol - Value is a pointer, actual arg in data buffer.
-  // WV: this is *not* a symbol, it is an absolute pointer to the memory 
-#if RETURN_REL_PTR == 1
-  return data + value;
-#else
-  return (__global uint *)value;
-#endif  
-}
 
 /**************************/
 /******* The Kernel *******/
@@ -293,7 +264,9 @@ __kernel void vm(__global packet *q,            /* Compute unit queues. */
 // if (th_id==0) {
 
     if (computation_complete(q, rq, nservicenodes)) {
+#ifdef OCLDBG		
 		printf("COMPLETE in %d\n",sn_id);
+#endif		
       *state = COMPLETE;
     }
 // }
@@ -386,7 +359,9 @@ void parse_pkt(packet p, __global packet *q, int nservicenodes, __global bytecod
 	  // so 10 + 8 bits are definitely in the right place
 	  // Then I can replace the opcode by the arg_idx and the core_status.
       /* Send the result back to the compute unit that sent the reference request. */
+#ifdef OCLDBG	  
 	  printf("Writing RESULT @WG %d (REF) to queue %d\n",sn_id,source);
+#endif	  
       q_write(p, sn_id,source, q, nservicenodes);
 
       /* Free up the subtask record so that it may be re-used. */
@@ -411,21 +386,26 @@ void parse_pkt(packet p, __global packet *q, int nservicenodes, __global bytecod
 
       /* Initial reference packet doesn't need to send the result anyhere. It's in the data buffer. */
       if (return_to == RETURN_ADDRESS) { // WV: ORIG (n + 1)) {
-		  printf("BREAK @WG %d\n", sn_id);
-        break;
-      }
+#ifdef OCLDBG		  
+		  printf("RETURN from @WG %d\n", sn_id);
+#endif		  
+//        break;
+      } else {
       
       /* Create and send new packet containing the computation results. */
       packet p = pkt_create(DATA, sn_id, return_as_pos, return_as_addr, (uint)result);
+#ifdef OCLDBG	  
 	  printf("Writing RESULT @WG %d (DATA) to queue %d\n",sn_id,return_to);
+#endif	  
       q_write(p, sn_id,return_to, q, nservicenodes);
 
       /* Free up the subtask record so that it may be re-used. */
       subt_cleanup(subtask, subt);
+	  }
     }
     break;
-  }
-}
+  } 
+} // END of switch()
 
 /* Create a subtask record from reference packet information. Return an identifier to the
    subtask record in the subtask table. */
@@ -439,7 +419,7 @@ uint parse_subtask(uint source,                  /* The compute unit who sent th
                    __global subt *subt,
                    __global uint *data
                    ) {
-	printf("parse_subtask() in WG %d\n",get_group_id(0));
+	//printf("parse_subtask() in WG %d\n",get_group_id(0));
   /* Get an available subtask record from the stack */
   ushort av_index;
   while (!subt_pop(&av_index, subt)) {}
@@ -474,7 +454,7 @@ uint parse_subtask(uint source,                  /* The compute unit who sent th
     case K_R:
       if (symbol_is_quoted(symbol)) {
 		  /*
-#ifdef DBG          
+#ifdef OCLDBG          
           printf("Found quoted K_R: %d:%d:%d:%d, %d\n",                  
                    symbol_get_SNId(symbol),
  symbol_get_SNLId(symbol),
@@ -487,7 +467,7 @@ uint parse_subtask(uint source,                  /* The compute unit who sent th
         subt_store_symbol(symbol, arg_pos, av_index, subt);
       } else {
 		  /*
-#ifdef DBG          
+#ifdef OCLDBG          
           printf("Found unquoted K_R: %d:%d:%d:%d, %d\n",                  
                    symbol_get_SNId(symbol),
  symbol_get_SNLId(symbol),
@@ -505,8 +485,8 @@ uint parse_subtask(uint source,                  /* The compute unit who sent th
         uint snid = symbol_get_SNId(symbol);
         
         uint destination = (snid - 1) % nservicenodes; // -1 as service 0 is not reserved for gateway.
-#ifdef DBG        
-         printf("DEST: (%d - 1) mod %d = %d\n",snid,nservicenodes,destination);
+#ifdef OCLDBG        
+//         printf("DEST: (%d - 1) mod %d = %d\n",snid,nservicenodes,destination);
 #endif         
         /* Send the packet and request the computation. */		
         q_write(p, get_group_id(0), destination, q, nservicenodes);
@@ -517,8 +497,8 @@ uint parse_subtask(uint source,                  /* The compute unit who sent th
       break;
 
     case K_B:
-#ifdef DBG      
-      printf("Found K_B: %d\n",symbol_get_value(symbol));
+#ifdef OCLDBG      
+//	printf("Found K_B: %u\n",symbol_get_value(symbol));
 #endif      
       subt_store_symbol(symbol, arg_pos, av_index, subt);
       break;
@@ -546,17 +526,19 @@ ulong service_compute(__global subt* subt, uint subtask, __global uint *data) {
 
   switch (service) {
   case M_OclGPRM_MAT_mult: {
-#ifdef DBG          
+#ifdef OCLDBG          
           printf("Calling M_OclGPRM_MAT_mult, work group id = %d\n",get_group_id(0));
-#endif                                    
+#endif            
+		  
     __global uint *m1 = &data[get_arg_value(0, rec, data)]; 
     __global uint *m2 = &data[get_arg_value(1, rec, data)]; 
 	ulong res_idx = get_arg_value(2, rec, data);
     __global uint *result = &data[res_idx]; 
      uint n = (uint)get_arg_value(3, rec, data);
+
+#ifdef OCLDBG          
+     printf("Got args for M_OclGPRM_MAT_mult, size = %d\n",n);
 	 /*
-#ifdef DBG          
-     printf("Got args for M_OclGPRM_MAT_mult, size = %d\n",sz);
 	 
      printf("Mem addr m1 = 0x%X - 0x%X = 0x%X\n",m1,data,((uint)m1-(uint)data));
 	      printf("Mem addr check = 0x%X\n",data[1]);
@@ -567,18 +549,23 @@ ulong service_compute(__global subt* subt, uint subtask, __global uint *data) {
 	 printf("m1=0x%X\n",m1);
      printf("Mem addr m2 = 0x%X\n",((uint)m2-(uint)data));
      printf("Mem addr result = 0x%X\n",((uint)result-(uint)data));
-#endif
 */
+#endif
+
+
     for (int i = 0; i < n; i++) {
       for (int r = 0; r < n; r++) {
         uint sum = 0;
         for (int c = 0; c < n; c++) {
-          sum +=  m1[i * n + c] * m2[c * n + r];
+          sum +=  0;//m1[i * n + c] * m2[c * n + r];
         }
-        result[i*n+r] = sum;
+//        result[i*n+r] = sum;
       }
     }
-#ifdef DBG          
+
+
+	/*
+#ifdef OCLDBG          
     for (int i = 0; i < n; i++) {
       for (int r = 0; r < n; r++) {
 		  printf("%d ",m1[i*n+r]);
@@ -599,12 +586,12 @@ ulong service_compute(__global subt* subt, uint subtask, __global uint *data) {
     }
           printf("Done M_OclGPRM_MAT_mult\n");
 #endif                                    
-    
+    */
     return res_idx;
   }
 
   case M_OclGPRM_MAT_add: {
-#ifdef DBG          
+#ifdef OCLDBG          
           printf("Calling M_OclGPRM_MAT_add, work group id = %d\n",get_group_id(0));
 #endif                                    
 							  
@@ -628,7 +615,7 @@ ulong service_compute(__global subt* subt, uint subtask, __global uint *data) {
     }
 
   case M_OclGPRM_MAT_unit: {
-#ifdef DBG          
+#ifdef OCLDBG          
           printf("Calling M_OclGPRM_MAT_unit, work group id = %d\n",get_group_id(0));
 #endif                                    
     ulong m_idx= get_arg_value(0, rec, data);
@@ -640,7 +627,9 @@ ulong service_compute(__global subt* subt, uint subtask, __global uint *data) {
         m[i * n + j] = (i == j) ? 1 : 0;
       }
     }
-#ifdef DBG          
+	/*
+#ifdef OCLDBG          
+	
     for (int i = 0; i < n; i++) {
       for (int r = 0; r < n; r++) {
 		  printf("%d ",m[i*n+r]);
@@ -648,18 +637,19 @@ ulong service_compute(__global subt* subt, uint subtask, __global uint *data) {
 	  printf("\n");
     }
           printf("Done M_OclGPRM_MAT_unit, work group id = %d\n",get_group_id(0));
-#endif                                    
+#endif
+*/
     return m_idx; // 
   }
 
   case M_OclGPRM_MEM_ptr: {
-#ifdef DBG          
+#ifdef OCLDBG          
           printf("Calling M_OclGPRM_MEM_ptr, work group id = %d\n",get_group_id(0));
 #endif                                    
     ulong arg1 = (uint) get_arg_value(0, rec, data);
     return data[DATA_INFO_OFFSET + arg1];
 	/*
-#ifdef DBG
+#ifdef OCLDBG
     printf("Found pointer data[%d]=%d\n",DATA_INFO_OFFSET + arg1,data[DATA_INFO_OFFSET + arg1]);
     printf("Mem addr = 0x%X + 0x%X = 0x%X\n",data , data[DATA_INFO_OFFSET + arg1]<<2,data + data[DATA_INFO_OFFSET + arg1]);
 	data[ data[DATA_INFO_OFFSET + arg1] ] =557188;
@@ -671,7 +661,7 @@ ulong service_compute(__global subt* subt, uint subtask, __global uint *data) {
   }
     
   case M_OclGPRM_MEM_const: {
-#ifdef DBG          
+#ifdef OCLDBG          
           printf("Calling M_OclGPRM_MEM_const, work group id = %d\n",get_group_id(0));
 #endif                                    
 
@@ -1065,7 +1055,7 @@ void q_transfer(__global packet *rq, __global packet *q, int n) {
   size_t n_id = get_group_id(0);
   for (int i = 0; i < n; i++) {
     while (q_read(&packet, n_id, i, rq, n)) {
-		printf("TRANSFER in %d for %d\n",n_id,i);
+//		printf("TRANSFER in %d for %d\n",n_id,i);
       q_write(packet, i, n_id, q, n);
     }
   }
