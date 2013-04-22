@@ -8,39 +8,18 @@ NOTES:
 - Somehow, example 1 only works with *exactly* 2 services on the GPU, even if we need only 1
 - At the moment, the type of data[] is uint, need to make sure int/float/double work!
 
-I want to return absolute pointers from the services, so the return value should be
 
-__global uint*
+The idea is:
+@WG SRC, 
+1. write into OUT queue for DEST, i.e. q_out[SRC][DEST]
+2. transfer into IN queue of DEST at location SRC i.e. q_in[DEST][SRC]
 
-On the other hand, get_arg_value should preferably return an index into data[],
-so that I don't have to do
-
-&data[((uint)get_arg_value(0, rec, data)-(uint)data)>>2]
-
-but simply
-
-&data[get_arg_value(0, rec, data)]
-
-That means that get_arg_value will get the index from the pointer, so I should do
-
-(value-(uint)data)>>2
-
-But of course only if value is a pointer! Otherwise, I should return just value
-
-This convoluted approach is needed because somehow
-
-__global int* m = get_arg_value(); 
-m[0]=0;
-
-does not work, but
-
-__global int* m = &data[((uint)get_arg_value()-(uint)data)>>2];
-
-does work. Which means that the latter aliases, but the former does not.
-
+So we need 
+q_write(node_id,q_id)
+q_read(node_id,q_id)
 
  */
-#define DBG 1
+#define DBG 0
 
 void report(__global uint*, uint);
 
@@ -137,7 +116,7 @@ uint parse_subtask(uint source,
                    __global subt *subt,
                    __global uint *data);
 ulong service_compute(__global subt* subt, uint subtask,__global uint *data);
-bool computation_complete(__global packet *q, int n);
+bool computation_complete(__global packet *q,  __global packet *rq, int n);
 
 void subt_store_symbol(bytecode payload, uint arg_pos, ushort i, __global subt *subt);
 bool subt_is_ready(ushort i, __global subt *subt);
@@ -208,8 +187,8 @@ bool q_last_op_is_write(size_t id, size_t gid, __global packet *q, int n);
 bool q_is_empty(size_t id, size_t gid, __global packet *q, int n);
 bool q_is_full(size_t id, size_t gid,__global packet *q, int n);
 uint q_size(size_t id, size_t gid, __global packet *q, int n);
-bool q_read(packet *result, size_t id, __global packet *q, int n);
-bool q_write(packet value, size_t id, __global packet *q, int n);
+bool q_read(packet *result, size_t n_id, size_t q_id, __global packet *q, int n);
+bool q_write(packet value, size_t n_id, size_t q_id,__global packet *q, int n);
 
 packet pkt_create(uint type, uint source, uint arg, uint sub, uint payload);
 uint pkt_get_type(packet p);
@@ -301,7 +280,10 @@ __kernel void vm(__global packet *q,            /* Compute unit queues. */
                  __global uint *data            /* Data memory for temporary results. */
                  ) {
  size_t th_id = get_local_id(0);
-  if (*state == WRITE) { 
+ size_t sn_id = get_group_id(0);
+  if (*state == WRITE) {
+// printf("WRITE Workgroup id: %d\n",sn_id);
+	  
 //      if (th_id==0) 
         q_transfer(rq, q, nservicenodes);
     
@@ -310,14 +292,17 @@ __kernel void vm(__global packet *q,            /* Compute unit queues. */
     barrier(CLK_GLOBAL_MEM_FENCE);
 // if (th_id==0) {
 
-    if (computation_complete(q, nservicenodes)) {
+    if (computation_complete(q, rq, nservicenodes)) {
+		printf("COMPLETE in %d\n",sn_id);
       *state = COMPLETE;
     }
 // }
   } else if (*state == READ) {
+// printf("READ Workgroup id: %d\n",sn_id);
     for (int i = 0; i < nservicenodes; i++) {
       packet p;
-      while (q_read(&p, i, q, nservicenodes)) {
+      while (q_read(&p, sn_id, i, q, nservicenodes)) {
+//		  printf("Reading packet @WG %d from queue %d\n",sn_id,i);
         parse_pkt(p, rq, nservicenodes, cStore, subt, data);
       }
     }
@@ -326,10 +311,13 @@ __kernel void vm(__global packet *q,            /* Compute unit queues. */
 
 /* Is the entire computation complete? When all compute units are inactive (no packets in their queues)
    the computation is complete. */
-bool computation_complete(__global packet *q, int n) {
+bool computation_complete(__global packet *q, __global packet *rq, int n) {
   for (int i = 0; i < n; i++) {
     for (int j = 0; j < n; j++) {
       if (!q_is_empty(i, j, q, n)) {
+        return false;
+      }
+      if (!q_is_empty(i, j, rq, n)) {
         return false;
       }
     }
@@ -398,7 +386,8 @@ void parse_pkt(packet p, __global packet *q, int nservicenodes, __global bytecod
 	  // so 10 + 8 bits are definitely in the right place
 	  // Then I can replace the opcode by the arg_idx and the core_status.
       /* Send the result back to the compute unit that sent the reference request. */
-      q_write(p, source, q, nservicenodes);
+	  printf("Writing RESULT @WG %d (REF) to queue %d\n",sn_id,source);
+      q_write(p, sn_id,source, q, nservicenodes);
 
       /* Free up the subtask record so that it may be re-used. */
       subt_cleanup(ref_subtask, subt);
@@ -422,12 +411,14 @@ void parse_pkt(packet p, __global packet *q, int nservicenodes, __global bytecod
 
       /* Initial reference packet doesn't need to send the result anyhere. It's in the data buffer. */
       if (return_to == RETURN_ADDRESS) { // WV: ORIG (n + 1)) {
+		  printf("BREAK @WG %d\n", sn_id);
         break;
       }
       
       /* Create and send new packet containing the computation results. */
       packet p = pkt_create(DATA, sn_id, return_as_pos, return_as_addr, (uint)result);
-      q_write(p, return_to, q, nservicenodes);
+	  printf("Writing RESULT @WG %d (DATA) to queue %d\n",sn_id,return_to);
+      q_write(p, sn_id,return_to, q, nservicenodes);
 
       /* Free up the subtask record so that it may be re-used. */
       subt_cleanup(subtask, subt);
@@ -448,6 +439,7 @@ uint parse_subtask(uint source,                  /* The compute unit who sent th
                    __global subt *subt,
                    __global uint *data
                    ) {
+	printf("parse_subtask() in WG %d\n",get_group_id(0));
   /* Get an available subtask record from the stack */
   ushort av_index;
   while (!subt_pop(&av_index, subt)) {}
@@ -481,6 +473,7 @@ uint parse_subtask(uint source,                  /* The compute unit who sent th
     switch (symbol_get_kind(symbol)) {
     case K_R:
       if (symbol_is_quoted(symbol)) {
+		  /*
 #ifdef DBG          
           printf("Found quoted K_R: %d:%d:%d:%d, %d\n",                  
                    symbol_get_SNId(symbol),
@@ -489,9 +482,11 @@ uint parse_subtask(uint source,                  /* The compute unit who sent th
  symbol_get_opcode(symbol),
  symbol_get_address(symbol)
  );
-#endif               
+#endif      
+*/
         subt_store_symbol(symbol, arg_pos, av_index, subt);
       } else {
+		  /*
 #ifdef DBG          
           printf("Found unquoted K_R: %d:%d:%d:%d, %d\n",                  
                    symbol_get_SNId(symbol),
@@ -500,7 +495,8 @@ uint parse_subtask(uint source,                  /* The compute unit who sent th
  symbol_get_opcode(symbol),
  symbol_get_address(symbol)
  );
-#endif          
+#endif      
+*/
         /* Create a packet to request a computation. */
         uint address = symbol_get_address(symbol);
         packet p = pkt_create(REFERENCE, get_group_id(0), arg_pos, av_index, address);
@@ -510,10 +506,10 @@ uint parse_subtask(uint source,                  /* The compute unit who sent th
         
         uint destination = (snid - 1) % nservicenodes; // -1 as service 0 is not reserved for gateway.
 #ifdef DBG        
-         printf("(%d - 1) mod %d = %d\n",snid,nservicenodes,destination);
+         printf("DEST: (%d - 1) mod %d = %d\n",snid,nservicenodes,destination);
 #endif         
-        /* Send the packet and request the computation. */
-        q_write(p, destination, q, nservicenodes);
+        /* Send the packet and request the computation. */		
+        q_write(p, get_group_id(0), destination, q, nservicenodes);
 
         /* Mark argument as requested. */
         subt_rec_set_arg_status(rec, arg_pos, REQUESTING);
@@ -557,7 +553,8 @@ ulong service_compute(__global subt* subt, uint subtask, __global uint *data) {
     __global uint *m2 = &data[get_arg_value(1, rec, data)]; 
 	ulong res_idx = get_arg_value(2, rec, data);
     __global uint *result = &data[res_idx]; 
-     uint sz = (uint)get_arg_value(3, rec, data);
+     uint n = (uint)get_arg_value(3, rec, data);
+	 /*
 #ifdef DBG          
      printf("Got args for M_OclGPRM_MAT_mult, size = %d\n",sz);
 	 
@@ -570,8 +567,8 @@ ulong service_compute(__global subt* subt, uint subtask, __global uint *data) {
 	 printf("m1=0x%X\n",m1);
      printf("Mem addr m2 = 0x%X\n",((uint)m2-(uint)data));
      printf("Mem addr result = 0x%X\n",((uint)result-(uint)data));
-#endif	 
-    uint n = sz;
+#endif
+*/
     for (int i = 0; i < n; i++) {
       for (int r = 0; r < n; r++) {
         uint sum = 0;
@@ -582,6 +579,24 @@ ulong service_compute(__global subt* subt, uint subtask, __global uint *data) {
       }
     }
 #ifdef DBG          
+    for (int i = 0; i < n; i++) {
+      for (int r = 0; r < n; r++) {
+		  printf("%d ",m1[i*n+r]);
+      }
+	  printf("\n");
+    }
+    for (int i = 0; i < n; i++) {
+      for (int r = 0; r < n; r++) {
+		  printf("%d ",m2[i*n+r]);
+      }
+	  printf("\n");
+    }
+    for (int i = 0; i < n; i++) {
+      for (int r = 0; r < n; r++) {
+		  printf("%d ",result[i*n+r]);
+      }
+	  printf("\n");
+    }
           printf("Done M_OclGPRM_MAT_mult\n");
 #endif                                    
     
@@ -622,13 +637,25 @@ ulong service_compute(__global subt* subt, uint subtask, __global uint *data) {
 	__global uint* m = &data[m_idx];
     for (int i = 0; i < n; i++) {
       for (int j = 0; j < n; j++) {
-        *(m + (i * n + j)) = (i == j) ? 1 : 0;
+        m[i * n + j] = (i == j) ? 1 : 0;
       }
     }
+#ifdef DBG          
+    for (int i = 0; i < n; i++) {
+      for (int r = 0; r < n; r++) {
+		  printf("%d ",m[i*n+r]);
+      }
+	  printf("\n");
+    }
+          printf("Done M_OclGPRM_MAT_unit, work group id = %d\n",get_group_id(0));
+#endif                                    
     return m_idx; // 
   }
 
   case M_OclGPRM_MEM_ptr: {
+#ifdef DBG          
+          printf("Calling M_OclGPRM_MEM_ptr, work group id = %d\n",get_group_id(0));
+#endif                                    
     ulong arg1 = (uint) get_arg_value(0, rec, data);
     return data[DATA_INFO_OFFSET + arg1];
 	/*
@@ -644,6 +671,10 @@ ulong service_compute(__global subt* subt, uint subtask, __global uint *data) {
   }
     
   case M_OclGPRM_MEM_const: {
+#ifdef DBG          
+          printf("Calling M_OclGPRM_MEM_const, work group id = %d\n",get_group_id(0));
+#endif                                    
+
     ulong arg1 = get_arg_value(0, rec, data);
     return data[arg1 + DATA_INFO_OFFSET]; // the actual constant
   }
@@ -1031,102 +1062,103 @@ void symbol_set_value(bytecode *s, ulong value) {
 /* Copy all compute unit owned queue values from the readQueue into the real queues. */
 void q_transfer(__global packet *rq, __global packet *q, int n) {
   packet packet;
+  size_t n_id = get_group_id(0);
   for (int i = 0; i < n; i++) {
-    while (q_read(&packet, i, rq, n)) {
-      q_write(packet, i, q, n);
+    while (q_read(&packet, n_id, i, rq, n)) {
+		printf("TRANSFER in %d for %d\n",n_id,i);
+      q_write(packet, i, n_id, q, n);
     }
   }
 }
 
 /* Returns the array index of the head element of the queue. */
-uint q_get_head_index(size_t id, size_t gid, __global packet *q, int n) {
-  ushort2 indices = as_ushort2(q[id * n + gid].x);
+uint q_get_head_index(size_t n_id, size_t q_id, __global packet *q, int n) {
+  ushort2 indices = as_ushort2(q[n_id * n + q_id].x);
   return indices.x;
 }
 
 /* Returns the array index of the tail element of the queue. */
-uint q_get_tail_index(size_t id, size_t gid,__global packet *q, int n) {
-  ushort2 indices = as_ushort2(q[id * n + gid].x);
+uint q_get_tail_index(size_t n_id, size_t q_id,__global packet *q, int n) {
+  ushort2 indices = as_ushort2(q[n_id * n + q_id].x);
   return indices.y;
 }
 
 /* Set the array index of the head element of the queue. */
-void q_set_head_index(uint index, size_t id, size_t gid, __global packet *q, int n) {
-  ushort2 indices = as_ushort2(q[id * n + gid].x);
+void q_set_head_index(uint index, size_t n_id, size_t q_id, __global packet *q, int n) {
+  ushort2 indices = as_ushort2(q[n_id * n + q_id].x);
   indices.x = index;
-  q[id * n + gid].x = as_uint(indices);
+  q[n_id * n + q_id].x = as_uint(indices);
 }
 
 /* Set the array index of the tail element of the queue. */
-void q_set_tail_index(uint index, size_t id, size_t gid,__global packet *q, int n) {
-  ushort2 indices = as_ushort2(q[id * n + gid].x);
+void q_set_tail_index(uint index, size_t n_id, size_t q_id,__global packet *q, int n) {
+  ushort2 indices = as_ushort2(q[n_id * n + q_id].x);
   indices.y = index;
-  q[id * n + gid].x = as_uint(indices);
+  q[n_id * n + q_id].x = as_uint(indices);
 }
 
 /* Set the type of the operation last performed on the queue. */
-void q_set_last_op(uint type, size_t id, size_t gid, __global packet *q, int n) {
-  q[id * n + gid].y = type;
+void q_set_last_op(uint type, size_t n_id, size_t q_id, __global packet *q, int n) {
+  q[n_id * n + q_id].y = type;
 }
 
 /* Returns true if the last operation performed on the queue is a read, false otherwise. */
-bool q_last_op_is_read(size_t id, size_t gid,__global packet *q, int n) {
-  return q[id * n + gid].y == READ;
+bool q_last_op_is_read(size_t n_id, size_t q_id,__global packet *q, int n) {
+  return q[n_id * n + q_id].y == READ;
 }
 
 /* Returns true if the last operation performed on the queue is a write, false otherwise. */
-bool q_last_op_is_write(size_t id, size_t gid,__global packet *q, int n) {
-  return q[id * n + gid].y == WRITE;
+bool q_last_op_is_write(size_t n_id, size_t q_id,__global packet *q, int n) {
+  return q[n_id * n + q_id].y == WRITE;
 }
 
 /* Returns true if the queue is empty, false otherwise. */
-bool q_is_empty(size_t id, size_t gid,  __global packet *q, int n) {
-  return (q_get_head_index(id, gid, q, n) == q_get_tail_index(id, gid, q, n))
-    && q_last_op_is_read(id, gid, q, n);
+bool q_is_empty(size_t n_id, size_t q_id,  __global packet *q, int n) {
+  return (q_get_head_index(n_id, q_id, q, n) == q_get_tail_index(n_id, q_id, q, n))
+    && q_last_op_is_read(n_id, q_id, q, n);
 }
 
 /* Returns true if the queue is full, false otherwise. */
-bool q_is_full(size_t id, size_t gid, __global packet *q, int n) {
-  return (q_get_head_index(id, gid, q, n) == q_get_tail_index(id, gid, q, n))
-    && q_last_op_is_write(id, gid, q, n);
+bool q_is_full(size_t n_id, size_t q_id, __global packet *q, int n) {
+  return (q_get_head_index(n_id, q_id, q, n) == q_get_tail_index(n_id, q_id, q, n))
+    && q_last_op_is_write(n_id, q_id, q, n);
 }
 
 /* Return the size of the queue. */
-uint q_size(size_t id, size_t gid, __global packet *q, int n) {
-  if (q_is_full(id, gid, q, n)) return MAX_BYTECODE_SZ;
-  if (q_is_empty(id, gid, q, n)) return 0;
-  uint head = q_get_head_index(id, gid, q, n);
-  uint tail = q_get_tail_index(id, gid, q, n);
+uint q_size(size_t n_id, size_t q_id, __global packet *q, int n) {
+  if (q_is_full(n_id, q_id, q, n)) return MAX_BYTECODE_SZ;
+  if (q_is_empty(n_id, q_id, q, n)) return 0;
+  uint head = q_get_head_index(n_id, q_id, q, n);
+  uint tail = q_get_tail_index(n_id, q_id, q, n);
   return (tail > head) ? (tail - head) : MAX_BYTECODE_SZ - head;
 }
 
 /* Read the value located at the head index of the queue into 'result'.
  * Returns true if succcessful (queue is not empty), false otherwise. */
-bool q_read(packet *result, size_t id, __global packet *q, int n) {
-  size_t gid = get_group_id(0);
-  if (q_is_empty(gid, id, q, n)) {
+bool q_read(packet *result, size_t n_id, size_t q_id, __global packet *q, int n) {
+  if (q_is_empty(n_id, q_id, q, n)) {
     return false;
   }
 
-  int index = q_get_head_index(gid, id, q, n);
-  *result = q[(n*n) + (gid * n * MAX_BYTECODE_SZ) + (id * MAX_BYTECODE_SZ) + index];
-  q_set_head_index((index + 1) % MAX_BYTECODE_SZ, gid, id, q, n);
-  q_set_last_op(READ, gid, id, q, n);
+  int index = q_get_head_index(n_id, q_id, q, n);
+  *result = q[(n*n) + (n_id * n * MAX_BYTECODE_SZ) + (q_id * MAX_BYTECODE_SZ) + index];
+  q_set_head_index((index + 1) % MAX_BYTECODE_SZ, n_id, q_id, q, n);
+  q_set_last_op(READ, n_id, q_id, q, n);
   return true;
 }
 
 /* Write a value into the tail index of the queue.
  * Returns true if successful (queue is not full), false otherwise. */
-bool q_write(packet value, size_t id, __global packet *q, int n) {
-  size_t gid = get_group_id(0);
-  if (q_is_full(id, gid, q, n)) {
+bool q_write(packet value, size_t n_id, size_t q_id,__global packet *q, int n) {
+//	printf("Writing @WG %d into queue for WG %d\n",n_id,q_id);
+  if (q_is_full(n_id, q_id, q, n)) {
     return false;
   }
 
-  int index = q_get_tail_index(id, gid, q, n);
-  q[(n*n) + (id * n * MAX_BYTECODE_SZ) + (gid * MAX_BYTECODE_SZ) + index] = value;
-  q_set_tail_index((index + 1) % MAX_BYTECODE_SZ, id, gid, q, n);
-  q_set_last_op(WRITE, id, gid, q, n);
+  int index = q_get_tail_index(n_id, q_id, q, n);
+  q[(n*n) + (n_id * n * MAX_BYTECODE_SZ) + (q_id * MAX_BYTECODE_SZ) + index] = value;
+  q_set_tail_index((index + 1) % MAX_BYTECODE_SZ, n_id, q_id, q, n);
+  q_set_last_op(WRITE, n_id, q_id, q, n);
   return true;
 }
 

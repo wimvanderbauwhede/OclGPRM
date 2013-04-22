@@ -206,6 +206,7 @@ int main(int argc, char **argv) {
     while (*state != COMPLETE) {
       commandQueue.enqueueNDRangeKernel(kernel, cl::NullRange, global, local);
       commandQueue.finish();
+	  std::cout << "\n *** CONTROL TO CPU *** \n";
       toggleState(commandQueue, stateBuffer, state);
     }
     
