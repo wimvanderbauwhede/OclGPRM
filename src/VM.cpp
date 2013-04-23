@@ -1,6 +1,7 @@
 #define __CL_ENABLE_EXCEPTIONS
 #define _IN_HOST
 #define OCLDBG
+//#define OLD
 
 #ifdef OSX
 #include <cl.hpp>
@@ -30,8 +31,18 @@ const char *KERNEL_FILE = "kernels/VM.cl";
 
 const int NARGS = 3;
 const int NPACKET_SHIFT = ((NBYTES * 8) - 16);
-const int FS_Length = 32;
-const long F_Length = 0x0000ffff00000000;
+
+// From GPRM ServiceConfiguration.h
+const unsigned int P_code = 2;
+const unsigned int P_reference = 3;
+const unsigned int FS_Length = 32;
+const uint64_t F_Length = 0x0000ffff00000000;
+const unsigned int FS_Packet_type=56;
+const uint64_t FW_Packet_type=0xFFULL;
+const unsigned int FS_CodeAddress = 32 ;
+const uint64_t FW_CodeAddress=0x3FFULL;
+
+
 
 void toggleState(cl::CommandQueue& commandQueue, cl::Buffer& stateBuffer, int *state);
 subt *createSubt();
@@ -136,21 +147,58 @@ int main(int argc, char **argv) {
     /* Read the bytecode from file. */
     std::deque<bytecode> bytecodeWords = readBytecode(argv[1]);
     std::deque< std::deque<bytecode> > packets = words2Packets(bytecodeWords);
-    
+#ifdef OLD    
     /* Populate the code store. */
+	
     for (std::deque< std::deque<bytecode> >::iterator iterP = packets.begin(); iterP != packets.end(); iterP++) {
       std::deque<bytecode> packet = *iterP;
       for (std::deque<bytecode>::iterator iterW = packet.begin(); iterW != packet.end(); iterW++) {
         bytecode word = *iterW;
         int packetN = iterP - packets.begin(); // Which packet?
         int wordN = iterW - packet.begin(); // Which word?
-        codeStore[((packetN + 1) * MAX_BYTECODE_SZ) + wordN] = word;
+
+        //codeStore[((packetN + 1) * MAX_BYTECODE_SZ) + wordN] = word;
+		std::cout << "codeStore["<<((packetN + 1) * MAX_BYTECODE_SZ) + wordN<<"] = "<<word<<";\n";
       }
     }
-    
+#else	
+	std::cout << "\n\n New code store code\n\n";
+ /* Populate the code store -- WV */
+	unsigned int root_address = 1;
+    for (std::deque< std::deque<bytecode> >::iterator iterP = packets.begin(); iterP != packets.end(); iterP++) {
+      std::deque<bytecode> packet = *iterP;
+	  unsigned int word_count=0;
+	  unsigned int packet_type=0;
+	  unsigned int code_address=0;
+      for (std::deque<bytecode>::iterator iterW = packet.begin(); iterW != packet.end(); iterW++) {
+        bytecode word = *iterW;
+		if (word_count==0) {
+			packet_type = (word>>FS_Packet_type) & FW_Packet_type;
+		}
+		if (word_count==2) {
+			code_address = (word >> FS_CodeAddress) & FW_CodeAddress;
+			if (packet_type == P_reference && word_count==2) {
+				root_address=code_address;
+				std::cout << "root address: "<<root_address<<"\n";
+			}
+		}
+		if (packet_type == P_code && word_count>2) {					
+			codeStore[ code_address * MAX_BYTECODE_SZ + word_count - 3] = word;
+     		std::cout << "codeStore["<<code_address * MAX_BYTECODE_SZ + word_count - 3<<"] = "<<word<<";\n";
+			
+		}
+		word_count++;
+      }
+    }
+#endif
+
     /* Create initial packet. */
 	// WV: note that RETURN_ADDRESS is used as the final destination
-    packet p = pkt_create(REFERENCE, RETURN_ADDRESS, 0, 0, 1);
+	// This assumes the arg_pos and subtask are both 0 and the payload is 1
+	// i.e. the code at address 1 will be activated, 
+	// the result is destined for subtask 0, arg_pos 0, which of course do not exists
+	// This is a bit weak, because the code address might not be 1
+	packet p = pkt_create(REFERENCE, RETURN_ADDRESS, 0, 0, root_address);
     queues[nQueues] = p;   // Initial packet.
     queues[0].x = 1 << 16; // Tail index is 1.
     queues[0].y = WRITE;   // Last operation is write.
@@ -374,6 +422,9 @@ std::deque< std::deque<bytecode> > words2Packets(std::deque<bytecode>& bytecodeW
       if (i == 0) {
         length = (headerWord & F_Length) >> FS_Length;
       }
+#ifndef OLD
+	  packet.push_back(headerWord); // WV
+#endif	  
     }
 
     for (int i = 0; i < length; i++) {
