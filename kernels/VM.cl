@@ -4,12 +4,15 @@
  
 /*
 NOTES:
+Now it does not (always) hang the GPU, put the result is not correct!
 
-Now that it works on multiple threads, it completely hangs on the GPU ...
+What happens is that the VM exits before the computation is complete.
+Why does it exit?
 
-One reason was clearly the break; the other is that somehow K_B are read incorrectly!
- */
-
+Seemingly, whatever I do, only one thread runs! 
+also, get_group_id() and get_global_id() should return the same, but don't always!
+ 
+*/
 
 void report(__global uint*, uint);
 
@@ -285,18 +288,18 @@ __kernel void vm(__global packet *q,            /* Compute unit queues. */
 /* Is the entire computation complete? When all compute units are inactive (no packets in their queues)
    the computation is complete. */
 bool computation_complete(__global packet *q, __global packet *rq, int n) {
+  bool complete = true;
   for (int i = 0; i < n; i++) {
     for (int j = 0; j < n; j++) {
       if (!q_is_empty(i, j, q, n)) {
-        return false;
+        complete =  false;
       }
       if (!q_is_empty(i, j, rq, n)) {
-        return false;
+        complete = false;
       }
     }
   }
-
-  return true;
+  return complete;
 }
 
 /* Inspect a packet and perform some action depending on its contents. */
@@ -370,7 +373,7 @@ void parse_pkt(packet p, __global packet *q, int nservicenodes, __global bytecod
     break;
   }
     
-  case DATA:
+  case DATA: {
     /* Store the data in the subtask record. */
     subt_store_symbol(SYMBOL_KP_ZERO + address, arg_pos, subtask, subt);
 
@@ -385,7 +388,7 @@ void parse_pkt(packet p, __global packet *q, int nservicenodes, __global bytecod
       uint return_as_pos = subt_rec_get_return_as_pos(rec);
 
       /* Initial reference packet doesn't need to send the result anyhere. It's in the data buffer. */
-      if (return_to == RETURN_ADDRESS) { // WV: ORIG (n + 1)) {
+      if (return_to == RETURN_ADDRESS) { // WV: ORIG (n + 1)) 
 #ifdef OCLDBG		  
 		  printf("RETURN from @WG %d\n", sn_id);
 #endif		  
@@ -405,8 +408,8 @@ void parse_pkt(packet p, __global packet *q, int nservicenodes, __global bytecod
     }
     break;
   } 
-} // END of switch()
-
+  } // END of switch()
+}
 /* Create a subtask record from reference packet information. Return an identifier to the
    subtask record in the subtask table. */
 uint parse_subtask(uint source,                  /* The compute unit who sent the request. */
@@ -422,7 +425,7 @@ uint parse_subtask(uint source,                  /* The compute unit who sent th
 	//printf("parse_subtask() in WG %d\n",get_group_id(0));
   /* Get an available subtask record from the stack */
   ushort av_index;
-  while (!subt_pop(&av_index, subt)) {}
+  while (!subt_pop(&av_index, subt)) {} // WV: weird!
   __global subt_rec *rec = subt_get_rec(av_index, subt);
 
   /* Get the K_S symbol from the code store. */
@@ -496,20 +499,21 @@ uint parse_subtask(uint source,                  /* The compute unit who sent th
       }
       break;
 
-    case K_B:
+    case K_B: {
 #ifdef OCLDBG      
 //	printf("Found K_B: %u\n",symbol_get_value(symbol));
 #endif      
       subt_store_symbol(symbol, arg_pos, av_index, subt);
       break;
-    }
-  }
+			  }
+    } // END of switch()
+  } // for()
 
   /* Waiting for references to be computed. */
   subt_rec_set_subt_status(rec, PENDING);
 
   return av_index;
-}
+} // END of parse_subtask()
 
 /* Perform the computation represented by a subtask record and return a relative index
    to the result in the data buffer. */
@@ -557,9 +561,9 @@ ulong service_compute(__global subt* subt, uint subtask, __global uint *data) {
       for (int r = 0; r < n; r++) {
         uint sum = 0;
         for (int c = 0; c < n; c++) {
-          sum +=  0;//m1[i * n + c] * m2[c * n + r];
+          sum +=  m1[i * n + c] * m2[c * n + r];
         }
-//        result[i*n+r] = sum;
+        result[i*n+r] = sum;
       }
     }
 
@@ -683,17 +687,23 @@ ulong service_compute(__global subt* subt, uint subtask, __global uint *data) {
 
 // We assume every service returns a pointer
   case M_OclGPRM_CTRL_begin: {
+#ifdef OCLDBG          
+          printf("Calling M_OclGPRM_CTRL_begin, work group id = %d\n",get_group_id(0));
+#endif                                    
     ulong nargs = get_nargs(rec);
     ulong last_arg = get_arg_value(nargs-1, rec, data);
     return last_arg;
   }
 
   case M_OclGPRM_TEST_report: {
-	ulong res_array = get_arg_value(0, rec, data); // idx into data[]
+#ifdef OCLDBG          
+          printf("Calling M_OclGPRM_TEST_report, work group id = %d\n",get_group_id(0));
+#endif                                    
+	ulong res_array_idx = get_arg_value(0, rec, data); // idx into data[]
     ulong  idx = get_arg_value(1, rec, data); 	
 	// report takes an absolute pointer
-    report(&data[res_array],idx);
-	return res_array;
+    report(&data[res_array_idx],idx);
+	return res_array_idx;
   }
 
   case M_OclGPRM_CTRL_if: {
@@ -708,7 +718,8 @@ ulong service_compute(__global subt* subt, uint subtask, __global uint *data) {
         return get_arg_value(argidx, rec, data);
     }                                
   }
-
+  default:
+	return 0;
   }; // END of switch() of 
 
   return 0;
@@ -1242,6 +1253,6 @@ void report(__global uint* res_array, uint idx) {
     res_array[4*idx+0]=get_global_id(0);
     res_array[4*idx+1]=get_local_id(0);
     res_array[4*idx+2]=get_group_id(0);
-    res_array[4*idx+3]=get_num_groups(0);
+    res_array[4*idx+3]=idx;
 }
         

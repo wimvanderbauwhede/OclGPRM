@@ -6,6 +6,7 @@
 #else
 #include <CL/cl.hpp>
 #endif
+
 #include <unistd.h>
 #include <iostream>
 #include <fstream>
@@ -13,6 +14,7 @@
 #include <vector>
 #include <deque>
 #include <sstream>
+
 #include "DeviceInfo.h"
 #include "SharedMacros.h"
 #include "SharedTypes.h"
@@ -207,7 +209,7 @@ int main(int argc, char **argv) {
 	int iter=0;
     while (*state != COMPLETE ) {
 #ifdef OCLDBG	  
-	  std::cout << "\n *** CALL TO DEVICE " << iter << " *** \n";
+	  std::cout << "\n *** CALL #"<< iter <<" TO DEVICE *** \n";
 #endif	  
       commandQueue.enqueueNDRangeKernel(kernel, cl::NullRange, global, local);
       commandQueue.finish();
@@ -217,16 +219,46 @@ int main(int argc, char **argv) {
       toggleState(commandQueue, stateBuffer, state);
 	  iter++;
     }
-    
     commandQueue.finish();
     
     /* Read the results. */
     commandQueue.enqueueReadBuffer(dataBuffer, CL_TRUE, 0, dataSize * sizeof(cl_uint), data);
-    
+	// To debug, we need to read the queues and display their content
+	commandQueue.enqueueReadBuffer(qBuffer, CL_TRUE, 0, qBufSize * sizeof(packet), queues);
+	commandQueue.enqueueReadBuffer(rqBuffer, CL_TRUE, 0, qBufSize * sizeof(packet), readQueues);
+	// loop over all services
+	for (unsigned int ii=0;ii<nServices;ii++) {
+	// for every service, loop over all queues
+		for (unsigned int jj=0;jj<nServices;jj++) {
+	// just dump them, so print every word in this queue
+
+    int nQueues = nServices * nServices;
+    int qBufSize = (nQueues * MAX_BYTECODE_SZ) + nQueues;			
+			for (unsigned int kk=0;kk< MAX_BYTECODE_SZ ;kk++) {
+/*
+ 
+ */				
+					//queues[ii*nQueues+jj*nServices];
+			}		
+		}
+	}
+#if SELECT==4    
     // Print resulting matrix from example 4. MODIFY ME!!
     std::cout << ((int) data[data[6]]) << " " << ((int) data[data[6] + 1]) << std::endl;
     std::cout << ((int) data[data[6] + 2]) << " " << ((int) data[data[6] + 3]) << std::endl;
+#elif SELECT==1
 
+#elif SELECT==5
+		std::cout << "node\tglobal\tlocal\tgroup\tidx\n";
+
+	for (unsigned int ii=0;ii<4*nServices;ii+=4) {
+		std::cout << ii/4 << "\t";
+		std::cout << data[data[1]+ii+0] << "\t";
+		std::cout << data[data[1]+ii+1] << "\t";
+		std::cout << data[data[1]+ii+2] << "\t";
+		std::cout << data[data[1]+ii+3] << "\n";
+	}
+#endif	
     /* Cleanup */
     delete[] queues;
     delete[] readQueues;
