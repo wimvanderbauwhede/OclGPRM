@@ -1,5 +1,6 @@
 #define __CL_ENABLE_EXCEPTIONS
 #define _IN_HOST
+#define OCLDBG
 
 #ifdef OSX
 #include <cl.hpp>
@@ -206,42 +207,71 @@ int main(int argc, char **argv) {
     cl::NDRange global(nServices*NTH), local(NTH); // means nServices compute units, one thread per unit
 
     /* Run the kernel on NDRange until completion. */
-	int iter=0;
+	int iter=1;
     while (*state != COMPLETE ) {
 #ifdef OCLDBG	  
-	  std::cout << "\n *** CALL #"<< iter <<" TO DEVICE *** \n";
+	  std::cout << "\n *** CALL #"<< iter <<" TO DEVICE ("<<  (*state==READ?"READ & PARSE":"WRITE")  <<") *** \n";
 #endif	  
       commandQueue.enqueueNDRangeKernel(kernel, cl::NullRange, global, local);
       commandQueue.finish();
 #ifdef OCLDBG	  
 //	  std::cout << "\n *** CONTROL BACK TO HOST *** \n";
 #endif	  
-      toggleState(commandQueue, stateBuffer, state);
-	  iter++;
-    }
-    commandQueue.finish();
-    
+   
     /* Read the results. */
     commandQueue.enqueueReadBuffer(dataBuffer, CL_TRUE, 0, dataSize * sizeof(cl_uint), data);
 	// To debug, we need to read the queues and display their content
 	commandQueue.enqueueReadBuffer(qBuffer, CL_TRUE, 0, qBufSize * sizeof(packet), queues);
 	commandQueue.enqueueReadBuffer(rqBuffer, CL_TRUE, 0, qBufSize * sizeof(packet), readQueues);
 	// loop over all services
+   // int nQueues = nServices * nServices;
+    //int qBufSize = (nQueues * MAX_BYTECODE_SZ) + nQueues;			
+    
 	for (unsigned int ii=0;ii<nServices;ii++) {
 	// for every service, loop over all queues
-		for (unsigned int jj=0;jj<nServices;jj++) {
-	// just dump them, so print every word in this queue
+        std::cout << "\nBuffers for work group " << ii << "\n";
 
-    int nQueues = nServices * nServices;
-    int qBufSize = (nQueues * MAX_BYTECODE_SZ) + nQueues;			
-			for (unsigned int kk=0;kk< MAX_BYTECODE_SZ ;kk++) {
+		for (unsigned int jj=0;jj<nServices;jj++) {
 /*
- 
- */				
-					//queues[ii*nQueues+jj*nServices];
+        std::cout << "Queue pointers for buffer "<< jj <<" in work group " << ii <<":\n";
+
+        std::cout << readQueues[ii*nServices+jj].x<<";"<< readQueues[ii*nServices+jj].y<< "\t";
+        std::cout << queues[ii*nServices+jj].x<< ";"<<queues[ii*nServices+jj].y<<"\n";
+  */      
+	// just dump them, so print every word in this queue
+//        std::cout << "Packets in Read/Write Queue "<<jj<<" in work group " << ii <<":\n";
+        
+			for (unsigned int kk=0;kk< MAX_BYTECODE_SZ ;kk++) {
+
+            packet ppr=readQueues[nQueues+ii*nServices * MAX_BYTECODE_SZ + jj * MAX_BYTECODE_SZ + kk] ;
+            packet ppw=queues[nQueues+ii*nServices * MAX_BYTECODE_SZ + jj * MAX_BYTECODE_SZ + kk] ;
+            if ( (ppr.x!=0 && ppr.y !=0) || (ppw.x!=0 && ppw.y!=0)) {
+                    unsigned int rsubtask = (ppr.x >> 14) & 0x3FF;
+                    unsigned int rtype = ppr.x & 0x3;
+                    unsigned int rsource = (ppr.x >> 2) & 0xFF;
+                    unsigned int rarg_pos = (ppr.x >>10) & 0xF;
+                    unsigned int rpayload= ppr.y; 
+                    unsigned int wsubtask = (ppw.x >> 14) & 0x3FF;
+                    unsigned int wtype = ppw.x & 0x3;
+                    unsigned int wsource = (ppw.x >> 2) & 0xFF;
+                    unsigned int warg_pos = (ppw.x >>10) & 0xF;
+                    unsigned int wpayload= ppw.y ;
+            //std::cout <<jj <<"\t"<<kk<<": " << ppr.x<<";"<<ppr.y<<"\t"<<ppw.x<<";"<<ppw.y<<"\n";
+            std::cout <<jj <<"\t"<<kk<<": " << rsubtask <<":"<< rarg_pos <<":"<<rsource<<":"<<rtype  <<";"<<rpayload<<"\t";
+            std::cout  << wsubtask <<":"<< warg_pos<<":"<<wsource<<":"<<wtype  <<";"<<wpayload<<"\n";
+                        }
+			
 			}		
+            
 		}
 	}
+
+
+          toggleState(commandQueue, stateBuffer, state);
+	  iter++;
+    }
+    commandQueue.finish();
+ 
 #if SELECT==4    
     // Print resulting matrix from example 4. MODIFY ME!!
     std::cout << ((int) data[data[6]]) << " " << ((int) data[data[6] + 1]) << std::endl;

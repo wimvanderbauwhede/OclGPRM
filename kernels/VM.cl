@@ -700,9 +700,16 @@ ulong service_compute(__global subt* subt, uint subtask, __global uint *data) {
           printf("Calling M_OclGPRM_TEST_report, work group id = %d\n",get_group_id(0));
 #endif                                    
 	ulong res_array_idx = get_arg_value(0, rec, data); // idx into data[]
-    ulong  idx = get_arg_value(1, rec, data); 	
+    ulong faulty_idx = get_arg_value(1, rec, data); 	
+
+    ulong  idx = get_group_id(0);//get_arg_value(1, rec, data); 	
 	// report takes an absolute pointer
-    report(&data[res_array_idx],idx);
+    //report(&data[res_array_idx],idx);
+    data[res_array_idx+4*idx+0]=get_global_id(0);
+    data[res_array_idx+4*idx+1]=get_local_id(0);
+    data[res_array_idx+4*idx+2]=get_group_id(0);
+    data[res_array_idx+4*idx+3]=faulty_idx;
+    
 	return res_array_idx;
   }
 
@@ -998,7 +1005,8 @@ uint symbol_get_nargs(bytecode s) {
 
 /* Return the symbol (K_B) value. */
 uint symbol_get_value(bytecode s) {
-  return (s & SYMBOL_VALUE_MASK) >> SYMBOL_VALUE_SHIFT;
+  //return (s & SYMBOL_VALUE_MASK) >> SYMBOL_VALUE_SHIFT;
+  return (uint)s;
 }
 
 /* Set the symbol kind */
