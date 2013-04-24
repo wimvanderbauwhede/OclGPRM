@@ -27,10 +27,10 @@ unsigned populateData(cl_uint *data, unsigned int nServices) {
 //  std::cout << data[1] << "\n";
   data[n_io_regs + 1] = data[1] + (nServices*4); // Pointer to scratch free/scratch memory.
  	for (unsigned int ii=0;ii<4*nServices;ii+=4) {
-		 data[data[1]+ii+0] = 42;
-		 data[data[1]+ii+1] = 43;
-		 data[data[1]+ii+2] = 45;
-		 data[data[1]+ii+3] = 46;
+		 data[data[1]+ii+0] = 0;
+		 data[data[1]+ii+1] = 0;
+		 data[data[1]+ii+2] = 0;
+		 data[data[1]+ii+3] = 0;
 	}
  
     return  data[n_io_regs + 1];

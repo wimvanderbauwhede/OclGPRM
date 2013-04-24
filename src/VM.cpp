@@ -219,7 +219,7 @@ int main(int argc, char **argv) {
             - CODE_STORE_SIZE * MAX_BYTECODE_SZ * sizeof(bytecode)
             - sizeof(SubtaskTable)*nServices            
             ) / sizeof(cl_uint);// 4; // How many 32-bit integers?
-#ifdef OCLDBG	
+#ifdef OCLDBG
     std::cout << "Size of data[]: "<< dataSize << " words\n";
 #endif
     /* The data store */
@@ -227,8 +227,8 @@ int main(int argc, char **argv) {
     
     /* Users Write/allocate memory on the data buffer. */
     // WV: in many cases data depends on nServices
-#ifdef OCLDBG	
     unsigned int allocated = populateData(data,nServices);
+#ifdef OCLDBG
     std::cout << "Buffers allocated in data[]: "<< allocated << " words\n";
 #endif    
     /* Create memory buffers on the device. */
@@ -266,15 +266,16 @@ int main(int argc, char **argv) {
     /* Run the kernel on NDRange until completion. */
 	int iter=1;
     while (*state != COMPLETE ) {
-//#ifdef OCLDBG	  
+#ifdef OCLDBG	  
 	  std::cout << "\n *** CALL #"<< iter <<" TO DEVICE ("<<  (*state==READ?"READ & PARSE":"WRITE")  <<") *** \n";
-//#endif	  
+#endif	  
       commandQueue.enqueueNDRangeKernel(kernel, cl::NullRange, global, local);
       commandQueue.finish();
    
     /* Read the results. */
     commandQueue.enqueueReadBuffer(dataBuffer, CL_TRUE, 0, dataSize * sizeof(cl_uint), data);
-//#ifdef OCLDBG	  
+
+#ifdef OCLDBG	  
 	// Read the subtask table for debugging
 	commandQueue.enqueueReadBuffer(subtaskTableBuffer, CL_TRUE, 0, sizeof(SubtaskTable)*nServices, subtaskTables);
 	for (uint kk=0;kk<nServices;kk++) {
@@ -293,7 +294,7 @@ int main(int argc, char **argv) {
 	}
 	}
 	}
-//#endif	  
+#endif	  
 #ifdef OCLDBG	  
 	// To debug, we need to read the queues and display their content
 	commandQueue.enqueueReadBuffer(qBuffer, CL_TRUE, 0, qBufSize * sizeof(packet), queues);
@@ -342,8 +343,8 @@ int main(int argc, char **argv) {
 	}
 #endif
 
-          toggleState(commandQueue, stateBuffer, state);
-	  iter++;
+        toggleState(commandQueue, stateBuffer, state);
+        iter++;
     }
     commandQueue.finish();
  
@@ -359,11 +360,12 @@ int main(int argc, char **argv) {
 	for (unsigned int ii=0;ii<4*nServices;ii+=4) {
 		std::cout << ii/4 << "\t";
 		std::cout << data[data[1]+ii+0] << "\t";
-		std::cout << data[data[1]+ii+1] << "\t";
+        std::cout << data[data[1]+ii+1] << "\t";
 		std::cout << data[data[1]+ii+2] << "\t";
 		std::cout << data[data[1]+ii+3] << "\n";
 	}
 #endif	
+
     /* Cleanup */
     delete[] queues;
     delete[] readQueues;

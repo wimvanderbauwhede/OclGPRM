@@ -680,6 +680,25 @@ ulong service_compute(__global SubtaskTable* subt, uint subtask, __global uint *
     data[arg1 + DATA_INFO_OFFSET + BUFFER_PTR_FILE_SZ]=arg2;
     return arg2; // the value just written
   }
+/*
+ 
+  case M_OclGPRM_REG_incr: {
+    ulong arg1 = get_arg_value(0, rec, data);
+    data[arg1 + DATA_INFO_OFFSET + BUFFER_PTR_FILE_SZ]+=1;
+    uint arg2 = data[arg1 + DATA_INFO_OFFSET + BUFFER_PTR_FILE_SZ]
+    return arg2; // the value just written
+  }
+  case M_OclGPRM_REG_decr: {
+    ulong arg1 = get_arg_value(0, rec, data);
+    data[arg1 + DATA_INFO_OFFSET + BUFFER_PTR_FILE_SZ]-=1;
+    uint arg2 = data[arg1 + DATA_INFO_OFFSET + BUFFER_PTR_FILE_SZ]
+    return arg2; // the value just written
+  }
+ 
+ 
+ */
+
+
 
 // We assume every service returns a pointer
   case M_OclGPRM_CTRL_begin: {
@@ -695,18 +714,19 @@ ulong service_compute(__global SubtaskTable* subt, uint subtask, __global uint *
 #ifdef OCLDBG          
           printf("Calling M_OclGPRM_TEST_report, work group id = %d\n",get_group_id(0));
 #endif                                    
-	ulong res_array_idx = get_arg_value(1, rec, data); // idx into data[]
-    ulong faulty_idx = get_arg_value(0, rec, data); 	
-    ulong faulty_idx2 = get_arg_value(2, rec, data); 	
+	ulong res_array_idx = get_arg_value(0, rec, data); // idx into data[]
+    ulong idx = get_arg_value(1, rec, data); 	
+//    ulong faulty_idx2 = get_arg_value(2, rec, data); 	
 
-    ulong  idx = get_group_id(0);//get_arg_value(1, rec, data); 	
+//    ulong  idx = get_group_id(0);//get_arg_value(1, rec, data); 	
 	// report takes an absolute pointer
-    //report(&data[res_array_idx],idx);
+    report(&data[res_array_idx],idx);
+/*    
     data[res_array_idx+4*idx+0]=get_global_id(0);
-    data[res_array_idx+4*idx+1]=faulty_idx2;//get_local_id(0);
+    data[res_array_idx+4*idx+1]=get_local_id(0);
     data[res_array_idx+4*idx+2]=get_group_id(0);
-    data[res_array_idx+4*idx+3]=faulty_idx;
-    
+    data[res_array_idx+4*idx+3]=idx;
+*/    
 	return res_array_idx;
   }
 
