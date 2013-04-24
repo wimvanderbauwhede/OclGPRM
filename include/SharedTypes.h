@@ -31,23 +31,32 @@ typedef ulong bytecode;
 /* A subtask table record. */
 /* WV  
  added nargs and code_address 
+ changed order a bit and added some more padding
+ now it's aligned to 40 32-bit words or 80 16-bit words
+ but we have 1 16-bit word per record for the address stack
+ so we should actually use 39 words and have a 32-bit address stack
 */
-typedef struct subt_rec {
-  uint service_id;              // [32bits] Opcode.
-  bytecode args[MAX_BYTECODE_SZ-1];    // [64bits] Pointers to data or constants.
-  uint code_addr; // address of the original bytecode
-  uchar arg_status[MAX_BYTECODE_SZ-1]; // [8bits]  The status of the arguments.
-  uchar nargs;
-  uchar subt_status;            // [8bits]: [4bits]  Subtask status and [4bits] number of args absent.  
-  uchar return_to;              // [8bits]  The service core to return to.
-  ushort return_as;             // [16bits]: [8bits]  Subtask record address and [8bits] argument position.
-  uint padding; // what it says
-} subt_rec;
+typedef struct SubtaskRecord {
+// 32
+  uint service_id;		            // [32bits] Opcode.
+  uint code_addr;					// [32bits]: address of the original bytecode
+  bytecode args[MAX_BYTECODE_SZ-1]; // [64bits] * 15 Pointers to data or constants.
+// 4
+  uchar nargs;						// [8bits]: number of arguments
+  uchar arg_status[MAX_BYTECODE_SZ-1]; // [8bits] * 15 The status of the arguments.
+// 1
+  uchar subt_status;				// [8bits]: [4bits]  Subtask status and [4bits] number of args absent.  
+  uchar return_to;					// [8bits]  The service core to return to.
+  ushort return_as;					// [16bits]: [8bits]  Subtask record address and [8bits] argument position.
+// 2
+  uint padding32[2];				// [32bits] * 3  what it says
+//  ulong padding64[12];				// [64bits] * 12
+} SubtaskRecord;
 
 /* The subtask table with associated available record stack. */
-typedef struct subt {
-  subt_rec recs[SUBT_SIZE];      // The subtask table records.
-  ushort av_recs[SUBT_SIZE + 1]; // Stack of available records.
-} subt;
+typedef struct SubtaskTable {
+  SubtaskRecord recs[SUBT_SIZE+1];      // The subtask table records. one too many, for padding
+  uint av_recs[SUBT_SIZE+1]; // Stack of available records. // WV: ugly. The 1 is the stack pointer
+} SubtaskTable;
 
 #endif 

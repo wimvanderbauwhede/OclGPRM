@@ -11,7 +11,7 @@
 // Sizes
 #define MAX_BYTECODE_SZ 16
 #define CODE_STORE_SIZE (256 * MAX_BYTECODE_SZ)
-#define SUBT_SIZE 1024
+#define SUBT_SIZE (1024-1) // -1 because of the stack pointer
 // Various
 #define DATA_INFO_OFFSET 1
 #define NBYTES 8 // Number of bytes in a bytecode word.

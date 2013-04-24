@@ -4,14 +4,8 @@
  
 /*
 NOTES:
-Now it does not (always) hang the GPU, put the result is not correct!
-
-What happens is that the VM exits before the computation is complete.
-Why does it exit?
-
-Seemingly, whatever I do, only one thread runs! 
-also, get_group_id() and get_global_id() should return the same, but don't always!
- 
+Tracked the main bug to the fact that the subtask table was shared among all services.
+That leads to push/pop conflicts!
 */
 
 void report(__global uint*, uint);
@@ -68,6 +62,7 @@ void report(__global uint*, uint);
 #define SYMBOL_ADDRESS_SHIFT 32
 
 #define SYMBOL_NARGS_MASK    0xF00000000UL        // 00000000000000000000000000001111 00000000000000000000000000000000
+#define SYMBOL_NARGS_FW		 0xF // 15 args max
 #define SYMBOL_NARGS_SHIFT   32
 
 #define SYMBOL_SERVICE_MASK  0xFFFFFFFFUL         // 00000000000000000000000000000000 11111111111111111111111111111111
@@ -98,7 +93,7 @@ void report(__global uint*, uint);
 /******* Function Prototypes *******/
 /***********************************/
 
-void parse_pkt(packet p, __global packet *q, int n, __global bytecode *cStore, __global subt *subt, __global uint *data);
+void parse_pkt(packet p, __global packet *q, int n, __global bytecode *cStore, __global SubtaskTable *subt, __global uint *data);
 uint parse_subtask(uint source,
                    uint arg_pos,
                    uint subtask,
@@ -106,43 +101,43 @@ uint parse_subtask(uint source,
                    __global packet *q,
                    int n,
                    __global bytecode *cStore,
-                   __global subt *subt,
+                   __global SubtaskTable *subt,
                    __global uint *data);
-ulong service_compute(__global subt* subt, uint subtask,__global uint *data);
+ulong service_compute(__global SubtaskTable* subt, uint subtask,__global uint *data);
 bool computation_complete(__global packet *q,  __global packet *rq, int n);
 
-void subt_store_symbol(bytecode payload, uint arg_pos, ushort i, __global subt *subt);
-bool subt_is_ready(ushort i, __global subt *subt);
-bool subt_push(ushort i, __global subt *subt);
-bool subt_pop(ushort *result, __global subt *subt);
-bool subt_is_full(__global subt *subt);
-bool subt_is_empty(__global subt *subt);
-void subt_cleanup(ushort i, __global subt *subt);
-ushort subt_top(__global subt *subt);
-void subt_set_top(__global subt *subt, ushort i);
+void subt_store_symbol(bytecode payload, uint arg_pos, uint i, __global SubtaskTable *subt);
+bool subt_is_ready(uint i, __global SubtaskTable *subt);
+bool subt_push(uint i, __global SubtaskTable *subt);
+bool subt_pop(uint *result, __global SubtaskTable *subt);
+bool subt_is_full(__global SubtaskTable *subt);
+bool subt_is_empty(__global SubtaskTable *subt);
+void subt_cleanup(uint i, __global SubtaskTable *subt);
+uint subt_top(__global SubtaskTable *subt);
+void subt_set_top(__global SubtaskTable *subt, uint i);
 
-uint subt_rec_get_service_id(__global subt_rec *r);
-bytecode subt_rec_get_arg(__global subt_rec *r, uint arg_pos);
-uint subt_rec_get_arg_status(__global subt_rec *r, uint arg_pos);
-uint subt_rec_get_subt_status(__global subt_rec *r);
-uint subt_rec_get_nargs(__global subt_rec *r);
-uint subt_rec_get_nargs_absent(__global subt_rec *r);
-uint subt_rec_get_code_addr(__global subt_rec *r);
-uint subt_rec_get_return_to(__global subt_rec *r);
-uint subt_rec_get_return_as(__global subt_rec *r);
-uint subt_rec_get_return_as_addr(__global subt_rec *r);
-uint subt_rec_get_return_as_pos(__global subt_rec *r);
-void subt_rec_set_service_id(__global subt_rec *r, uint service_id);
-void subt_rec_set_arg(__global subt_rec *r, uint arg_pos, bytecode arg);
-void subt_rec_set_arg_status(__global subt_rec *r, uint arg_pos, uint status);
-void subt_rec_set_subt_status(__global subt_rec *r, uint status);
-void subt_rec_set_nargs(__global subt_rec *r, uint n);
-void subt_rec_set_nargs_absent(__global subt_rec *r, uint n);
-void subt_rec_set_code_addr(__global subt_rec *r, uint return_to);
-void subt_rec_set_return_to(__global subt_rec *r, uint return_to);
-void subt_rec_set_return_as(__global subt_rec *r, uint return_as);
-void subt_rec_set_return_as_addr(__global subt_rec *r, uint return_as_addr);
-void subt_rec_set_return_as_pos(__global subt_rec *r, uint return_as_pos);
+uint subt_rec_get_service_id(__global SubtaskRecord *r);
+bytecode subt_rec_get_arg(__global SubtaskRecord *r, uint arg_pos);
+uint subt_rec_get_arg_status(__global SubtaskRecord *r, uint arg_pos);
+uint subt_rec_get_subt_status(__global SubtaskRecord *r);
+uint subt_rec_get_nargs(__global SubtaskRecord *r);
+uint subt_rec_get_nargs_absent(__global SubtaskRecord *r);
+uint subt_rec_get_code_addr(__global SubtaskRecord *r);
+uint subt_rec_get_return_to(__global SubtaskRecord *r);
+uint subt_rec_get_return_as(__global SubtaskRecord *r);
+uint subt_rec_get_return_as_addr(__global SubtaskRecord *r);
+uint subt_rec_get_return_as_pos(__global SubtaskRecord *r);
+void subt_rec_set_service_id(__global SubtaskRecord *r, uint service_id);
+void subt_rec_set_arg(__global SubtaskRecord *r, uint arg_pos, bytecode arg);
+void subt_rec_set_arg_status(__global SubtaskRecord *r, uint arg_pos, uint status);
+void subt_rec_set_subt_status(__global SubtaskRecord *r, uint status);
+void subt_rec_set_nargs(__global SubtaskRecord *r, uint n);
+void subt_rec_set_nargs_absent(__global SubtaskRecord *r, uint n);
+void subt_rec_set_code_addr(__global SubtaskRecord *r, uint return_to);
+void subt_rec_set_return_to(__global SubtaskRecord *r, uint return_to);
+void subt_rec_set_return_as(__global SubtaskRecord *r, uint return_as);
+void subt_rec_set_return_as_addr(__global SubtaskRecord *r, uint return_as_addr);
+void subt_rec_set_return_as_pos(__global SubtaskRecord *r, uint return_as_pos);
 
 bytecode symbol_KS_create(uint nargs, uint SNId, uint SNLId, uint SNCId, uint opcode);
 bytecode symbol_KR_create(uint subtask, uint SNId);
@@ -203,26 +198,26 @@ void pkt_set_payload(packet *p, uint payload);
  * above functions that call them, I avoid requiring a function signature. It is messy
  * but its the only solution that works - I really don't see the conflict.
 
-__global subt_rec* subt_get_rec(ushort i, __global subt *subt);
-__global uint* get_arg_value(uint arg_pos, __global subt_rec *rec, __global uint *data);
+__global subt_rec* subt_get_rec(uint i, __global SubtaskTable *subt);
+__global uint* get_arg_value(uint arg_pos, __global SubtaskRecord *rec, __global uint *data);
 */
 
 /* Return the subtask record at index i in the subtask table. */
-__global subt_rec *subt_get_rec(ushort i, __global subt *subt) {
-  return &(subt->recs[i]);
+__global SubtaskRecord *subt_get_rec(uint i, __global SubtaskTable *subt) {
+  return &(subt[get_group_id(0)].recs[i]);
 }
 
 // ------------------------------- GPRM KERNEL API -------------------------------
 // These functions are for use inside GPRM kernels
 //-------------------------------------------------------------------------------- 
-uint get_nargs( __global subt_rec *rec);
-uint is_quoted_ref(uint arg_pos, __global subt_rec *rec);
+uint get_nargs( __global SubtaskRecord *rec);
+uint is_quoted_ref(uint arg_pos, __global SubtaskRecord *rec);
 
 
 /* Get the argument value stored at 'arg_pos' from a subtask record. */
 // In the case of a (quoted) K_R symbol, we need to return the actual symbol
 // Note that we return indices into the data[] array, not absolute pointers, so the ulong type is fine
-ulong get_arg_value(uint arg_pos, __global subt_rec *rec, __global uint *data) {
+ulong get_arg_value(uint arg_pos, __global SubtaskRecord *rec, __global uint *data) {
   bytecode symbol = subt_rec_get_arg(rec, arg_pos);
   uint kind = symbol_get_kind(symbol);
   uint value = symbol_get_value(symbol);
@@ -250,7 +245,7 @@ __kernel void vm(__global packet *q,            /* Compute unit queues. */
                  uint nservicenodes,             /* The number of service nodes. */
                  __global int *state,           /* Are we in the READ or WRITE state? */
                  __global bytecode *cStore,     /* The code store. */
-                 __global subt *subt,           /* The subtask table. */
+                 __global SubtaskTable *subt,           /* The subtask table. */
                  __global uint *data            /* Data memory for temporary results. */
                  ) {
  size_t th_id = get_local_id(0);
@@ -303,7 +298,7 @@ bool computation_complete(__global packet *q, __global packet *rq, int n) {
 }
 
 /* Inspect a packet and perform some action depending on its contents. */
-void parse_pkt(packet p, __global packet *q, int nservicenodes, __global bytecode *cStore, __global subt *subt, __global uint *data) {
+void parse_pkt(packet p, __global packet *q, int nservicenodes, __global bytecode *cStore, __global SubtaskTable *subt, __global uint *data) {
   uint type = pkt_get_type(p);
   uint source = pkt_get_source(p);
   uint arg_pos = pkt_get_arg_pos(p);
@@ -382,7 +377,7 @@ void parse_pkt(packet p, __global packet *q, int nservicenodes, __global bytecod
       ulong result = service_compute(subt, subtask, data);
 
       /* Figure out where to send the result to. */
-      __global subt_rec *rec = subt_get_rec(subtask, subt);
+      __global SubtaskRecord *rec = subt_get_rec(subtask, subt);
       uint return_to = subt_rec_get_return_to(rec);
       uint return_as_addr = subt_rec_get_return_as_addr(rec);
       uint return_as_pos = subt_rec_get_return_as_pos(rec);
@@ -419,14 +414,14 @@ uint parse_subtask(uint source,                  /* The compute unit who sent th
                    __global packet *q,
                    int nservicenodes,
                    __global bytecode *cStore,
-                   __global subt *subt,
+                   __global SubtaskTable *subt,
                    __global uint *data
                    ) {
 	//printf("parse_subtask() in WG %d\n",get_group_id(0));
   /* Get an available subtask record from the stack */
-  ushort av_index;
+  uint av_index; // WV: av_index is the subtask address
   while (!subt_pop(&av_index, subt)) {} // WV: weird!
-  __global subt_rec *rec = subt_get_rec(av_index, subt);
+  __global SubtaskRecord *rec = subt_get_rec(av_index, subt);
 
   /* Get the K_S symbol from the code store. */
   bytecode symbol = cStore[address * MAX_BYTECODE_SZ];
@@ -436,6 +431,7 @@ uint parse_subtask(uint source,                  /* The compute unit who sent th
   uint nargs = symbol_get_nargs(symbol);
 
   subt_rec_set_service_id(rec, service);
+  subt_rec_set_code_addr(rec, address);
   subt_rec_set_subt_status(rec, NEW);
   subt_rec_set_nargs(rec, nargs);
   subt_rec_set_nargs_absent(rec, nargs);
@@ -517,8 +513,8 @@ uint parse_subtask(uint source,                  /* The compute unit who sent th
 
 /* Perform the computation represented by a subtask record and return a relative index
    to the result in the data buffer. */
-ulong service_compute(__global subt* subt, uint subtask, __global uint *data) {
-  __global subt_rec *rec = subt_get_rec(subtask, subt);
+ulong service_compute(__global SubtaskTable* subt, uint subtask, __global uint *data) {
+  __global SubtaskRecord *rec = subt_get_rec(subtask, subt);
   uint service_details = subt_rec_get_service_id(rec);
 
   uint library = symbol_get_SNLId(service_details);
@@ -699,14 +695,15 @@ ulong service_compute(__global subt* subt, uint subtask, __global uint *data) {
 #ifdef OCLDBG          
           printf("Calling M_OclGPRM_TEST_report, work group id = %d\n",get_group_id(0));
 #endif                                    
-	ulong res_array_idx = get_arg_value(0, rec, data); // idx into data[]
-    ulong faulty_idx = get_arg_value(1, rec, data); 	
+	ulong res_array_idx = get_arg_value(1, rec, data); // idx into data[]
+    ulong faulty_idx = get_arg_value(0, rec, data); 	
+    ulong faulty_idx2 = get_arg_value(2, rec, data); 	
 
     ulong  idx = get_group_id(0);//get_arg_value(1, rec, data); 	
 	// report takes an absolute pointer
     //report(&data[res_array_idx],idx);
     data[res_array_idx+4*idx+0]=get_global_id(0);
-    data[res_array_idx+4*idx+1]=get_local_id(0);
+    data[res_array_idx+4*idx+1]=faulty_idx2;//get_local_id(0);
     data[res_array_idx+4*idx+2]=get_group_id(0);
     data[res_array_idx+4*idx+3]=faulty_idx;
     
@@ -738,8 +735,8 @@ ulong service_compute(__global subt* subt, uint subtask, __global uint *data) {
 /*********************************/
 
 /* Store a symbol in argument 'arg_pos' at subtask record 'i'. */
-void subt_store_symbol(bytecode symbol, uint arg_pos, ushort i, __global subt *subt) {
-  __global subt_rec *rec = subt_get_rec(i, subt);
+void subt_store_symbol(bytecode symbol, uint arg_pos, uint i, __global SubtaskTable *subt) {
+  __global SubtaskRecord *rec = subt_get_rec(i, subt);
   subt_rec_set_arg(rec, arg_pos, symbol);
   uint nargs_absent = subt_rec_get_nargs_absent(rec) - 1;
   subt_rec_set_arg_status(rec, arg_pos, PRESENT);
@@ -747,61 +744,59 @@ void subt_store_symbol(bytecode symbol, uint arg_pos, ushort i, __global subt *s
 }
 
 /* Is the subtask record at index i ready for computation? */
-bool subt_is_ready(ushort i, __global subt *subt) {
-  __global subt_rec *rec = subt_get_rec(i, subt);
+bool subt_is_ready(uint i, __global SubtaskTable *subt) {
+  __global SubtaskRecord *rec = subt_get_rec(i, subt);
   return subt_rec_get_nargs_absent(rec) == 0;
 }
 
-
-
 /* Remove the subtask record at index i from the subtask table and return
    it to the stack of available records. */
-bool subt_push(ushort i, __global subt *subt) {
+bool subt_push(uint i, __global SubtaskTable *subt) {
   if (subt_is_empty(subt)) {
     return false;
   }
   
-  ushort top = subt_top(subt);
-  subt->av_recs[top - 1] = i;
+  uint top = subt_top(subt);
+  subt[get_group_id(0)].av_recs[top - 1] = i;
   subt_set_top(subt, top - 1);
   return true;
 }
 
 /* Return an available subtask record index from the subtask table. */
-bool subt_pop(ushort *av_index, __global subt *subt) {
+bool subt_pop(uint *av_index, __global SubtaskTable *subt) {
   if (subt_is_full(subt)) {
     return false;
   }
 
-  ushort top = subt_top(subt);
-  *av_index = subt->av_recs[top];
+  uint top = subt_top(subt);
+  *av_index = subt[get_group_id(0)].av_recs[top];
   subt_set_top(subt, top + 1);
   return true;
 }
 
 /* Remove and cleanup the subtask record at index i from the subtask table. */
-void subt_cleanup(ushort i, __global subt *subt) {
+void subt_cleanup(uint i, __global SubtaskTable *subt) {
   subt_push(i, subt);
 }
 
 /* Is the subtask table full? */
-bool subt_is_full(__global subt *subt) {
+bool subt_is_full(__global SubtaskTable *subt) {
   return subt_top(subt) == SUBT_SIZE + 1;
 }
 
 /* Is the subtask table empty? */
-bool subt_is_empty(__global subt *subt) {
+bool subt_is_empty(__global SubtaskTable *subt) {
   return subt_top(subt) == 1;
 }
 
 /* Return the top of available records stack index. */
-ushort subt_top(__global subt *subt) {
-  return subt->av_recs[0];
+uint subt_top(__global SubtaskTable *subt) {
+  return subt[get_group_id(0)].av_recs[0];
 }
 
 /* Set the top of available records stack index. */
-void subt_set_top(__global subt *subt, ushort i) {
-  subt->av_recs[0] = i;
+void subt_set_top(__global SubtaskTable *subt, uint i) {
+  subt[get_group_id(0)].av_recs[0] = i;
 }
 
 /**********************************/
@@ -809,115 +804,115 @@ void subt_set_top(__global subt *subt, ushort i) {
 /**********************************/
 
 /* Get the subtask record service id. */
-uint subt_rec_get_service_id(__global subt_rec *r) {
+uint subt_rec_get_service_id(__global SubtaskRecord *r) {
   return r->service_id;
 }
 
 /* Get a subtask record argument. */
-bytecode subt_rec_get_arg(__global subt_rec *r, uint arg_pos) {
+bytecode subt_rec_get_arg(__global SubtaskRecord *r, uint arg_pos) {
   return r->args[arg_pos];
 }
 
 /* Get the status of a subtask record argument. */
-uint subt_rec_get_arg_status(__global subt_rec *r, uint arg_pos) {
+uint subt_rec_get_arg_status(__global SubtaskRecord *r, uint arg_pos) {
   return r->arg_status[arg_pos];
 }
 
 /* Get the subtask record status. */
-uint subt_rec_get_subt_status(__global subt_rec *r) {
+uint subt_rec_get_subt_status(__global SubtaskRecord *r) {
   return (r->subt_status & SUBTREC_STATUS_MASK) >> SUBTREC_STATUS_SHIFT;
 }
 
 /* Get the number of arguments from the subtask record. */
-uint subt_rec_get_nargs(__global subt_rec *r) {
+uint subt_rec_get_nargs(__global SubtaskRecord *r) {
   return r->nargs;
 }
 
 /* Get the number of arguments absent in the subtask record. */
-uint subt_rec_get_nargs_absent(__global subt_rec *r) {
+uint subt_rec_get_nargs_absent(__global SubtaskRecord *r) {
   return (r->subt_status & SUBTREC_NARGS_ABSENT_MASK);
 }
 
 /* Get the subtask record return to attribute. */
-uint subt_rec_get_return_to(__global subt_rec *r) {
+uint subt_rec_get_return_to(__global SubtaskRecord *r) {
   return r->return_to;
 }
 
 /* Get the subtask record return as attribute. */
-uint subt_rec_get_return_as(__global subt_rec *r) {
+uint subt_rec_get_return_as(__global SubtaskRecord *r) {
   return r->return_as;
 }
 
 /* Get the subtask record return as address. */
-uint subt_rec_get_code_addr(__global subt_rec *r) {
+uint subt_rec_get_code_addr(__global SubtaskRecord *r) {
   return r->code_addr;
 }
 
 /* Get the subtask record return as address. */
-uint subt_rec_get_return_as_addr(__global subt_rec *r) {
+uint subt_rec_get_return_as_addr(__global SubtaskRecord *r) {
   return r->return_as & SUBTREC_RETURN_AS_ADDR_MASK;
 }
 
 /* Get the subtask record return as position. */
-uint subt_rec_get_return_as_pos(__global subt_rec *r) {
+uint subt_rec_get_return_as_pos(__global SubtaskRecord *r) {
   return r->return_as & SUBTREC_RETURN_AS_POS_MASK;
 }
 
 /* Set the subtask record service id. */
-void subt_rec_set_service_id(__global subt_rec *r, uint service_id) {
+void subt_rec_set_service_id(__global SubtaskRecord *r, uint service_id) {
   r->service_id = service_id;
 }
 
 /* Set the value of the a subtask record argument. */
-void subt_rec_set_arg(__global subt_rec *r, uint arg_pos, bytecode arg) {
+void subt_rec_set_arg(__global SubtaskRecord *r, uint arg_pos, bytecode arg) {
   r->args[arg_pos] = arg;
 }
 
 /* Set the status of a subtask record argument. */
-void subt_rec_set_arg_status(__global subt_rec *r, uint arg_pos, uint status) {
+void subt_rec_set_arg_status(__global SubtaskRecord *r, uint arg_pos, uint status) {
   r->arg_status[arg_pos] = status;
 }
 
 /* Set the subtask record status. */
-void subt_rec_set_subt_status(__global subt_rec *r, uint status) {
+void subt_rec_set_subt_status(__global SubtaskRecord *r, uint status) {
   r->subt_status = (r->subt_status & ~SUBTREC_STATUS_MASK)
     | ((status << SUBTREC_STATUS_SHIFT) & SUBTREC_STATUS_MASK);
 }
 
 /* Set the subtask record nargs attribute. */
-void subt_rec_set_nargs(__global subt_rec *r, uint nargs) {
+void subt_rec_set_nargs(__global SubtaskRecord *r, uint nargs) {
   r->nargs = nargs;
 }
 
 /* Set the subtask record nargs_absent attribute. */
-void subt_rec_set_nargs_absent(__global subt_rec *r, uint n) {
+void subt_rec_set_nargs_absent(__global SubtaskRecord *r, uint n) {
   r->subt_status = (r->subt_status & ~SUBTREC_NARGS_ABSENT_MASK)
     | ((n << SUBTREC_NARGS_ABSENT_SHIFT) & SUBTREC_NARGS_ABSENT_MASK);
 }
 
 /* Set the subtask record return to attribute. */
-void subt_rec_set_return_to(__global subt_rec *r, uint return_to) {
+void subt_rec_set_return_to(__global SubtaskRecord *r, uint return_to) {
   r->return_to = return_to;
 }
 
 /* Set the subtask record return_as attribute. */
-void subt_rec_set_return_as(__global subt_rec *r, uint return_as) {
+void subt_rec_set_return_as(__global SubtaskRecord *r, uint return_as) {
   r->return_as = return_as;
 }
 
 /* Set the subtask record return_as address. */
-void subt_rec_set_code_addr(__global subt_rec *r, uint code_addr) {
+void subt_rec_set_code_addr(__global SubtaskRecord *r, uint code_addr) {
   r->code_addr= code_addr;
 }
 
 /* Set the subtask record return_as address. */
-void subt_rec_set_return_as_addr(__global subt_rec *r, uint return_as_addr) {
+void subt_rec_set_return_as_addr(__global SubtaskRecord *r, uint return_as_addr) {
   r->return_as = (r->return_as & ~SUBTREC_RETURN_AS_ADDR_MASK)
     | ((return_as_addr << SUBTREC_RETURN_AS_ADDR_SHIFT) & SUBTREC_RETURN_AS_ADDR_MASK);
 }
 
 /* Set the subtask record return_as position. */
-void subt_rec_set_return_as_pos(__global subt_rec *r, uint return_as_pos) {
+void subt_rec_set_return_as_pos(__global SubtaskRecord *r, uint return_as_pos) {
   r->return_as = (r->return_as & ~SUBTREC_RETURN_AS_POS_MASK)
     | ((return_as_pos << SUBTREC_RETURN_AS_POS_SHIFT) & SUBTREC_RETURN_AS_POS_MASK);
 }
@@ -1000,7 +995,8 @@ uint symbol_get_address(bytecode s) {
 
 /* Return the symbol (K_S) nargs */
 uint symbol_get_nargs(bytecode s) {
-  return (s & SYMBOL_NARGS_MASK) >> SYMBOL_NARGS_SHIFT;
+//  return (s & SYMBOL_NARGS_MASK) >> SYMBOL_NARGS_SHIFT;
+  return (s >> SYMBOL_NARGS_SHIFT) & SYMBOL_NARGS_FW;
 }
 
 /* Return the symbol (K_B) value. */
@@ -1246,11 +1242,11 @@ void pkt_set_payload(packet *p, uint payload) {
 // These functions are for use inside GPRM kernels
 //-------------------------------------------------------------------------------- 
 
-uint get_nargs( __global subt_rec *rec) {
+uint get_nargs( __global SubtaskRecord *rec) {
     return rec->nargs;
 }
 
-uint is_quoted_ref(uint arg_pos, __global subt_rec *rec ) {
+uint is_quoted_ref(uint arg_pos, __global SubtaskRecord *rec ) {
   bytecode symbol = subt_rec_get_arg(rec, arg_pos);
   uint kind = symbol_get_kind(symbol);
   uint quoted = symbol_is_quoted(symbol);

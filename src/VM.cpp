@@ -1,6 +1,6 @@
 #define __CL_ENABLE_EXCEPTIONS
 #define _IN_HOST
-#define OCLDBG
+//#define OCLDBG
 //#define OLD
 
 #ifdef OSX
@@ -45,7 +45,8 @@ const uint64_t FW_CodeAddress=0x3FFULL;
 
 
 void toggleState(cl::CommandQueue& commandQueue, cl::Buffer& stateBuffer, int *state);
-subt *createSubt();
+void createSubtask(SubtaskTable*, uint);
+SubtaskTable *createSubt();
 void validateArguments(int argc);
 std::deque<bytecode> readBytecode(char *bytecodeFile);
 std::deque< std::deque<bytecode> > words2Packets(std::deque<bytecode>& bytecodeWords);
@@ -111,13 +112,15 @@ int main(int argc, char **argv) {
     /* How many services are to be used? */
     unsigned int nServices = 1;
     std::stringstream(argv[2]) >> nServices;
-	std::cout << "INFO: Device is " << ((deviceInfo.is_little_endian(device))? "LITTLE" : "BIG") <<"-endian\n";
+#ifdef OCLDBG
+	std::cout << "INFO: Device is " << ((deviceInfo.is_little_endian(device))? "LITTLE" : "BIG") <<"-endian\n";	
     if (nServices < maxComputeUnits) {
 		std::cout << "INFO: Number of services (requested "<< nServices<<") is smaller than the number of compute units, "<<maxComputeUnits <<". The device will be under-utilised\n";
 //		nServices = maxComputeUnits;
 	} else if (nServices > maxComputeUnits) {
 		std::cout << "INFO: Number of services (requested "<< nServices<<") is larger than the number of compute units, "<<maxComputeUnits <<". This will work fine but you could try and let GPRM schedule \n";
 	}
+#endif	
     /* Calculate the number of queues we need. */
     int nQueues = nServices * nServices;
     
@@ -157,12 +160,11 @@ int main(int argc, char **argv) {
         int packetN = iterP - packets.begin(); // Which packet?
         int wordN = iterW - packet.begin(); // Which word?
 
-        //codeStore[((packetN + 1) * MAX_BYTECODE_SZ) + wordN] = word;
-		std::cout << "codeStore["<<((packetN + 1) * MAX_BYTECODE_SZ) + wordN<<"] = "<<word<<";\n";
+        codeStore[((packetN + 1) * MAX_BYTECODE_SZ) + wordN] = word;
+		//std::cout << "codeStore["<<((packetN + 1) * MAX_BYTECODE_SZ) + wordN<<"] = "<<word<<";\n";
       }
     }
 #else	
-	std::cout << "\n\n New code store code\n\n";
  /* Populate the code store -- WV */
 	unsigned int root_address = 1;
     for (std::deque< std::deque<bytecode> >::iterator iterP = packets.begin(); iterP != packets.end(); iterP++) {
@@ -179,12 +181,12 @@ int main(int argc, char **argv) {
 			code_address = (word >> FS_CodeAddress) & FW_CodeAddress;
 			if (packet_type == P_reference && word_count==2) {
 				root_address=code_address;
-				std::cout << "root address: "<<root_address<<"\n";
+		//		std::cout << "root address: "<<root_address<<"\n";
 			}
 		}
 		if (packet_type == P_code && word_count>2) {					
 			codeStore[ code_address * MAX_BYTECODE_SZ + word_count - 3] = word;
-     		std::cout << "codeStore["<<code_address * MAX_BYTECODE_SZ + word_count - 3<<"] = "<<word<<";\n";
+     	//	std::cout << "codeStore["<<code_address * MAX_BYTECODE_SZ + word_count - 3<<"] = "<<word<<";\n";
 			
 		}
 		word_count++;
@@ -204,24 +206,31 @@ int main(int argc, char **argv) {
     queues[0].y = WRITE;   // Last operation is write.
 
     /* The subtask table. */
-    subt *subtaskTable = createSubt();
+    SubtaskTable* subtaskTables = new SubtaskTable[nServices];
+	for (uint ii=0;ii<nServices;ii++) {
+		createSubtask(subtaskTables,ii);//]= createSubt();
+	}
+//    SubtaskTable *subtaskTable = createSubt();
     // WV: The data buffer covers the whole memory apart from the memory used by the VM's data structures
     unsigned long dataSize = (
             maxGlobalAlloc 
             - 2* qBufSize * sizeof(packet) 
             - sizeof(int)
             - CODE_STORE_SIZE * MAX_BYTECODE_SZ * sizeof(bytecode)
-            - sizeof(subt)            
+            - sizeof(SubtaskTable)*nServices            
             ) / sizeof(cl_uint);// 4; // How many 32-bit integers?
+#ifdef OCLDBG	
     std::cout << "Size of data[]: "<< dataSize << " words\n";
+#endif
     /* The data store */
     cl_uint *data = new cl_uint[dataSize];
     
     /* Users Write/allocate memory on the data buffer. */
     // WV: in many cases data depends on nServices
+#ifdef OCLDBG	
     unsigned int allocated = populateData(data,nServices);
     std::cout << "Buffers allocated in data[]: "<< allocated << " words\n";
-    
+#endif    
     /* Create memory buffers on the device. */
     cl::Buffer qBuffer = cl::Buffer(context, CL_MEM_READ_WRITE, qBufSize * sizeof(packet));
     commandQueue.enqueueWriteBuffer(qBuffer, CL_TRUE, 0, qBufSize * sizeof(packet), queues);
@@ -235,8 +244,8 @@ int main(int argc, char **argv) {
     cl::Buffer codeStoreBuffer = cl::Buffer(context, CL_MEM_READ_ONLY, CODE_STORE_SIZE * MAX_BYTECODE_SZ * sizeof(bytecode));
     commandQueue.enqueueWriteBuffer(codeStoreBuffer, CL_TRUE, 0, CODE_STORE_SIZE * MAX_BYTECODE_SZ * sizeof(bytecode), codeStore);
     
-    cl::Buffer subtaskTableBuffer = cl::Buffer(context, CL_MEM_READ_WRITE, sizeof(subt));
-    commandQueue.enqueueWriteBuffer(subtaskTableBuffer, CL_TRUE, 0, sizeof(subt), subtaskTable);
+    cl::Buffer subtaskTableBuffer = cl::Buffer(context, CL_MEM_READ_WRITE, sizeof(SubtaskTable)*nServices);
+    commandQueue.enqueueWriteBuffer(subtaskTableBuffer, CL_TRUE, 0, sizeof(SubtaskTable)*nServices, subtaskTables);
 
     cl::Buffer dataBuffer = cl::Buffer(context, CL_MEM_READ_WRITE, dataSize * sizeof(cl_uint));
     commandQueue.enqueueWriteBuffer(dataBuffer, CL_TRUE, 0, dataSize * sizeof(cl_uint), data);
@@ -257,17 +266,35 @@ int main(int argc, char **argv) {
     /* Run the kernel on NDRange until completion. */
 	int iter=1;
     while (*state != COMPLETE ) {
-#ifdef OCLDBG	  
+//#ifdef OCLDBG	  
 	  std::cout << "\n *** CALL #"<< iter <<" TO DEVICE ("<<  (*state==READ?"READ & PARSE":"WRITE")  <<") *** \n";
-#endif	  
+//#endif	  
       commandQueue.enqueueNDRangeKernel(kernel, cl::NullRange, global, local);
       commandQueue.finish();
-#ifdef OCLDBG	  
-//	  std::cout << "\n *** CONTROL BACK TO HOST *** \n";
-#endif	  
    
     /* Read the results. */
     commandQueue.enqueueReadBuffer(dataBuffer, CL_TRUE, 0, dataSize * sizeof(cl_uint), data);
+//#ifdef OCLDBG	  
+	// Read the subtask table for debugging
+	commandQueue.enqueueReadBuffer(subtaskTableBuffer, CL_TRUE, 0, sizeof(SubtaskTable)*nServices, subtaskTables);
+	for (uint kk=0;kk<nServices;kk++) {
+	SubtaskTable subtaskTable =  subtaskTables[kk];	
+	uint stackpointer = subtaskTable.av_recs[0];
+	std::cout << "SUBTASK STACK: " << stackpointer << "\n";
+	for (uint jj = 0;jj<stackpointer;jj++) {
+	std::cout << "SUBTASK REC "<<jj<<":\n";
+	SubtaskRecord c_subt_rec= subtaskTable.recs[jj];
+	std::cout << "Opcode: "<< (uint)(c_subt_rec.service_id & 0xFF) << "\n";
+	std::cout << "Code addr: "<<(uint)c_subt_rec.code_addr << "\n";
+	uint nargs =  (uint)c_subt_rec.nargs ;
+	std::cout << "NArgs: "<<nargs << "\n";
+	for (uint ii=0;ii<nargs;ii++) {
+	std::cout << (uint)(c_subt_rec.args[ii])<< "\n";
+	}
+	}
+	}
+//#endif	  
+#ifdef OCLDBG	  
 	// To debug, we need to read the queues and display their content
 	commandQueue.enqueueReadBuffer(qBuffer, CL_TRUE, 0, qBufSize * sizeof(packet), queues);
 	commandQueue.enqueueReadBuffer(rqBuffer, CL_TRUE, 0, qBufSize * sizeof(packet), readQueues);
@@ -313,7 +340,7 @@ int main(int argc, char **argv) {
             
 		}
 	}
-
+#endif
 
           toggleState(commandQueue, stateBuffer, state);
 	  iter++;
@@ -342,7 +369,7 @@ int main(int argc, char **argv) {
     delete[] readQueues;
     delete[] codeStore;
     delete[] data;
-    delete subtaskTable;
+    delete[] subtaskTables;
     delete state;
   } catch (cl::Error error) {
     std::cout << "EXCEPTION: " << error.what() << " [" << error.err() << "]" << std::endl;
@@ -362,8 +389,8 @@ void toggleState(cl::CommandQueue& commandQueue, cl::Buffer& stateBuffer, int *s
 }
 
 /* Create and initialise a subtask table. */
-subt *createSubt() {
-  subt *table = new subt;
+SubtaskTable *createSubt() {
+  SubtaskTable* table = new SubtaskTable;
 
   if (table) {
     table->av_recs[0] = 1; // The first element is the top of stack index.
@@ -376,6 +403,19 @@ subt *createSubt() {
 
   return table;
 }
+
+/* Create and initialise a subtask table. */
+void createSubtask(SubtaskTable * table, uint idx) {
+
+    table[idx].av_recs[0] = 1; // The first element is the top of stack index.
+
+    /* Populate the stack with the available records in the subtask table. */
+    for (int i = 1; i < SUBT_SIZE + 1; i++) {
+      table[idx].av_recs[i] = i - 1;
+    }
+}
+
+
 
 /* Validate the command line arguments. */
 void validateArguments(int argc) {
