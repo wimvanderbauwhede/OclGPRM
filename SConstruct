@@ -6,11 +6,12 @@ sources=Split("""
 Packet.cpp
 UserData.cpp
 VM.cpp
+timing.cc
 """)
 
 sources = map (lambda s: 'src/'+s, sources)
 
-OclBuilder.USE_OCL_WRAPPER= False
+OclBuilder.useOclWrapper = False
 OclBuilder.kopts= '-I'+os.environ['PWD']+'/include'
 env = initOcl()
 sources+=[OclBuilder.OPENCL_DIR+'/OpenCLIntegration/DeviceInfo.cc']

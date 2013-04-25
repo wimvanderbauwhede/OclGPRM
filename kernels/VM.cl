@@ -4,8 +4,8 @@
  
 /*
 NOTES:
-Tracked the main bug to the fact that the subtask table was shared among all services.
-That leads to push/pop conflicts!
+We now support a model of NTH threads per service.
+
 */
 
 void report(__global uint*, uint);
@@ -197,10 +197,10 @@ void pkt_set_payload(packet *p, uint payload);
  * to do with the __global return value. By moving the function implementions
  * above functions that call them, I avoid requiring a function signature. It is messy
  * but its the only solution that works - I really don't see the conflict.
-
-__global subt_rec* subt_get_rec(uint i, __global SubtaskTable *subt);
-__global uint* get_arg_value(uint arg_pos, __global SubtaskRecord *rec, __global uint *data);
 */
+
+__global SubtaskRecord* subt_get_rec(uint i, __global SubtaskTable *subt);
+ulong get_arg_value(uint arg_pos, __global SubtaskRecord *rec, __global uint *data);
 
 /* Return the subtask record at index i in the subtask table. */
 __global SubtaskRecord *subt_get_rec(uint i, __global SubtaskTable *subt) {
@@ -253,13 +253,12 @@ __kernel void vm(__global packet *q,            /* Compute unit queues. */
   if (*state == WRITE) {
 // printf("WRITE Workgroup id: %d\n",sn_id);
 	  
-//      if (th_id==0) 
+      if (th_id==0) {
         q_transfer(rq, q, nservicenodes);
     
     /* Synchronise the work items to ensure that all packets have transferred. */
       // WV: don't see that this is needed if there is only one local thread
     barrier(CLK_GLOBAL_MEM_FENCE);
-// if (th_id==0) {
 
     if (computation_complete(q, rq, nservicenodes)) {
 #ifdef OCLDBG		
@@ -267,10 +266,10 @@ __kernel void vm(__global packet *q,            /* Compute unit queues. */
 #endif		
       *state = COMPLETE;
     }
-// }
+  } // th_id==0
   } else if (*state == READ) {
 // printf("READ Workgroup id: %d\n",sn_id);
-    for (int i = 0; i < nservicenodes; i++) {
+    for (uint i = 0; i < nservicenodes; i++) {
       packet p;
       while (q_read(&p, sn_id, i, q, nservicenodes)) {
 //		  printf("Reading packet @WG %d from queue %d\n",sn_id,i);
@@ -317,10 +316,12 @@ void parse_pkt(packet p, __global packet *q, int nservicenodes, __global bytecod
 	if it is larger, the host should use nservicenodes as the NDRange instead of nunits.
 
  */
+#ifdef OCLDBG
   size_t nunits = get_num_groups(0);	
+  size_t gl_id = get_global_id(0);
+#endif  
   size_t sn_id = get_group_id(0);
   size_t th_id = get_local_id(0);
-  size_t gl_id = get_global_id(0);
 
   switch (type) {
   case ERROR:
@@ -342,6 +343,7 @@ void parse_pkt(packet p, __global packet *q, int nservicenodes, __global bytecod
 	  // So 32 bits should do (provided we limit data[] to 4G 32-bit words
       /* Create a new packet containing the computation results. */
       //WV: ORIG packet p = pkt_create(DATA, get_global_id(0), arg_pos, subtask, result);
+      if (th_id==0) {
       packet p = pkt_create(DATA, sn_id, arg_pos, subtask, (uint)result);
 
 	  //WV: for dispatching a quoted K_R, we need
@@ -364,6 +366,7 @@ void parse_pkt(packet p, __global packet *q, int nservicenodes, __global bytecod
 
       /* Free up the subtask record so that it may be re-used. */
       subt_cleanup(ref_subtask, subt);
+      }
     }
     break;
   }
@@ -375,7 +378,7 @@ void parse_pkt(packet p, __global packet *q, int nservicenodes, __global bytecod
     if (subt_is_ready(subtask, subt)) {
       /* Perform the computation. */
       ulong result = service_compute(subt, subtask, data);
-
+      if (th_id==0) {
       /* Figure out where to send the result to. */
       __global SubtaskRecord *rec = subt_get_rec(subtask, subt);
       uint return_to = subt_rec_get_return_to(rec);
@@ -383,13 +386,7 @@ void parse_pkt(packet p, __global packet *q, int nservicenodes, __global bytecod
       uint return_as_pos = subt_rec_get_return_as_pos(rec);
 
       /* Initial reference packet doesn't need to send the result anyhere. It's in the data buffer. */
-      if (return_to == RETURN_ADDRESS) { // WV: ORIG (n + 1)) 
-#ifdef OCLDBG		  
-		  printf("RETURN from @WG %d\n", sn_id);
-#endif		  
-//        break;
-      } else {
-      
+      if (return_to != RETURN_ADDRESS) { // WV: ORIG (n + 1)) 
       /* Create and send new packet containing the computation results. */
       packet p = pkt_create(DATA, sn_id, return_as_pos, return_as_addr, (uint)result);
 #ifdef OCLDBG	  
@@ -399,7 +396,13 @@ void parse_pkt(packet p, __global packet *q, int nservicenodes, __global bytecod
 
       /* Free up the subtask record so that it may be re-used. */
       subt_cleanup(subtask, subt);
-	  }
+      }
+#ifdef OCLDBG		  
+      else {
+		  printf("RETURN from @WG %d\n", sn_id);
+      }
+#endif		  
+        }  
     }
     break;
   } 
@@ -442,7 +445,7 @@ uint parse_subtask(uint source,                  /* The compute unit who sent th
   /* Begin argument processing */
   subt_rec_set_subt_status(rec, PROCESSING);
 
-  for (int arg_pos = 0; arg_pos < nargs; arg_pos++) {
+  for (uint arg_pos = 0; arg_pos < nargs; arg_pos++) {
     /* Mark argument as absent. */
     subt_rec_set_arg_status(rec, arg_pos, ABSENT);
 
@@ -553,10 +556,10 @@ ulong service_compute(__global SubtaskTable* subt, uint subtask, __global uint *
 #endif
 
 
-    for (int i = 0; i < n; i++) {
-      for (int r = 0; r < n; r++) {
+    for (uint i = 0; i < n; i++) {
+      for (uint r = 0; r < n; r++) {
         uint sum = 0;
-        for (int c = 0; c < n; c++) {
+        for (uint c = 0; c < n; c++) {
           sum +=  m1[i * n + c] * m2[c * n + r];
         }
         result[i*n+r] = sum;
@@ -604,8 +607,8 @@ ulong service_compute(__global SubtaskTable* subt, uint subtask, __global uint *
 	__global uint* m2 = &data[m2_idx];
 	__global uint* result = &data[result_idx];
     
-    for (int row = 0; row < n; row++) {
-      for (int col = 0; col < n; col++) {
+    for (uint row = 0; row < n; row++) {
+      for (uint col = 0; col < n; col++) {
         uint sum = m1[row * n + col] + m2[row * n + col];
         result[row * n + col] = sum;
       }
@@ -622,8 +625,8 @@ ulong service_compute(__global SubtaskTable* subt, uint subtask, __global uint *
     uint sz = (uint)get_arg_value(1, rec, data);
     uint n = sz;
 	__global uint* m = &data[m_idx];
-    for (int i = 0; i < n; i++) {
-      for (int j = 0; j < n; j++) {
+    for (uint i = 0; i < n; i++) {
+      for (uint j = 0; j < n; j++) {
         m[i * n + j] = (i == j) ? 1 : 0;
       }
     }
@@ -1274,9 +1277,9 @@ uint is_quoted_ref(uint arg_pos, __global SubtaskRecord *rec ) {
 }
 
 void report(__global uint* res_array, uint idx) {
-    res_array[4*idx+0]=get_global_id(0);
-    res_array[4*idx+1]=get_local_id(0);
-    res_array[4*idx+2]=get_group_id(0);
-    res_array[4*idx+3]=idx;
+    res_array[4*NTH*idx+4*get_local_id(0)+0]=get_global_id(0);
+    res_array[4*NTH*idx+4*get_local_id(0)+1]=get_local_id(0);
+    res_array[4*NTH*idx+4*get_local_id(0)+2]=get_group_id(0);
+    res_array[4*NTH*idx+4*get_local_id(0)+3]=idx;
 }
         

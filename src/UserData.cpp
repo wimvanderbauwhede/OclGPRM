@@ -25,8 +25,8 @@ unsigned populateData(cl_uint *data, unsigned int nServices) {
   // WV start of memory area allocated for I/O buffers
   data[1] = BUFFER_PTR_FILE_SZ + REGISTER_FILE_SZ; // reg 0
 //  std::cout << data[1] << "\n";
-  data[n_io_regs + 1] = data[1] + (nServices*4); // Pointer to scratch free/scratch memory.
- 	for (unsigned int ii=0;ii<4*nServices;ii+=4) {
+  data[n_io_regs + 1] = data[1] + (nServices*NTH*4); // Pointer to scratch free/scratch memory.
+ 	for (unsigned int ii=0;ii<4*nServices*NTH;ii+=4) {
 		 data[data[1]+ii+0] = 0;
 		 data[data[1]+ii+1] = 0;
 		 data[data[1]+ii+2] = 0;

@@ -22,6 +22,7 @@
 #include "SharedTypes.h"
 #include "Packet.h"
 #include "UserData.h"
+#include "timing.h"
 
 const char *KERNEL_NAME = "vm";
 const char *KERNEL_FILE = "kernels/VM.cl";
@@ -262,9 +263,12 @@ int main(int argc, char **argv) {
     /* Set the NDRange. */
     //ORIG cl::NDRange global(nServices), local(nServices);
     cl::NDRange global(nServices*NTH), local(NTH); // means nServices compute units, one thread per unit
-
+    double t_start=wsecond();
+#if NRUNS > 1    
+    for (unsigned int nruns=1;nruns<=NRUNS; nruns++) {
+#endif        
     /* Run the kernel on NDRange until completion. */
-	int iter=1;
+	unsigned int iter=1;
     while (*state != COMPLETE ) {
 #ifdef OCLDBG	  
 	  std::cout << "\n *** CALL #"<< iter <<" TO DEVICE ("<<  (*state==READ?"READ & PARSE":"WRITE")  <<") *** \n";
@@ -347,7 +351,13 @@ int main(int argc, char **argv) {
         iter++;
     }
     commandQueue.finish();
- 
+#if NRUNS > 1     
+    *state = READ;
+  } // NRUNS  
+#endif
+    double t_stop=wsecond();
+    double t_elapsed = t_stop - t_start;
+    std::cout << "Finished in "<<t_elapsed/1000<<" s\n";
 #if SELECT==4    
     // Print resulting matrix from example 4. MODIFY ME!!
     std::cout << ((int) data[data[6]]) << " " << ((int) data[data[6] + 1]) << std::endl;
@@ -355,15 +365,17 @@ int main(int argc, char **argv) {
 #elif SELECT==1
 
 #elif SELECT==5
+#if VERBOSE==1    
 		std::cout << "node\tglobal\tlocal\tgroup\tidx\n";
 
-	for (unsigned int ii=0;ii<4*nServices;ii+=4) {
+	for (unsigned int ii=0;ii<4*nServices*NTH;ii+=4) {
 		std::cout << ii/4 << "\t";
 		std::cout << data[data[1]+ii+0] << "\t";
         std::cout << data[data[1]+ii+1] << "\t";
 		std::cout << data[data[1]+ii+2] << "\t";
 		std::cout << data[data[1]+ii+3] << "\n";
 	}
+#endif    
 #endif	
 
     /* Cleanup */
