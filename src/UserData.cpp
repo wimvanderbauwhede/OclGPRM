@@ -13,8 +13,38 @@
 int randomNumber(int max) {
   return (rand() % (max + 1));
 }
+#if EX == 2
+unsigned int populateData(cl_uint *data, unsigned int nServices) {
+  /* Initialise seed for random number generation. */
+  srand(1);
+  
+  int dim = WIDTH ;// N rows of a square matrix.
+  
+  /* Total number of memory sections allocated. */
+  unsigned int n_io_regs = 4;
+  data[0] = n_io_regs;
+  
+  /* Pointers to allocated memory. */
+  data[1] = BUFFER_PTR_FILE_SZ + REGISTER_FILE_SZ;
+  data[2] = data[1] + (dim * dim);
+  data[3] = data[2] + (dim * dim);
+  data[4] = dim;
+  /* Pointer to scratch memory. */
+  data[n_io_regs + 1] = data[3] + (dim * dim); // Pointer to scratch free/scratch memory.
+  
+  /* Populate input matrices. */
+  
+  for (uint i = data[1]; i < data[2]; i++) {
+    data[i] = randomNumber(10);
+  }
+  
+  for (uint i = data[2]; i < data[3]; i++) {
+    data[i] = randomNumber(10);
+  }
+  return  data[n_io_regs + 1];
+}
 
-#if EX == 5
+#elif EX == 5
 unsigned populateData(cl_uint *data, unsigned int nServices) {
 
   // number of I/O registers used

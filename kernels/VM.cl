@@ -9,6 +9,7 @@ We now support a model of NTH threads per service.
 */
 
 void report(__global uint*, uint);
+void matmultKernel ( __global uint *mA, __global uint *mB, __global uint *mC, uint mWidth);
 
 #include "SharedMacros.h"
 #include "SharedTypes.h"
@@ -537,59 +538,25 @@ ulong service_compute(__global SubtaskTable* subt, uint subtask, __global uint *
     __global uint *m2 = &data[get_arg_value(1, rec, data)]; 
 	ulong res_idx = get_arg_value(2, rec, data);
     __global uint *result = &data[res_idx]; 
-     uint n = (uint)get_arg_value(3, rec, data);
+     uint mWidth = (uint)get_arg_value(3, rec, data);
 
 #ifdef OCLDBG          
      printf("Got args for M_OclGPRM_MAT_mult, size = %d\n",n);
-	 /*
-	 
-     printf("Mem addr m1 = 0x%X - 0x%X = 0x%X\n",m1,data,((uint)m1-(uint)data));
-	      printf("Mem addr check = 0x%X\n",data[1]);
-
-	printf("m1[0]=%d\n",data[data[1]]);
-	 printf("m1[0]=%d\n",data[((uint)m1-(uint)data)>>2]); // i.e. data+((m1-data)>>2) or data + m1>>2 - data>>2
-	
-	 printf("m1=0x%X\n",m1);
-     printf("Mem addr m2 = 0x%X\n",((uint)m2-(uint)data));
-     printf("Mem addr result = 0x%X\n",((uint)result-(uint)data));
-*/
 #endif
-
-
-    for (uint i = 0; i < n; i++) {
-      for (uint r = 0; r < n; r++) {
-        uint sum = 0;
-        for (uint c = 0; c < n; c++) {
-          sum +=  m1[i * n + c] * m2[c * n + r];
+    matmultKernel(m1,m2,result,mWidth);
+/* 
+   // Naive version
+    for (uint i = 0; i < mWidth; i++) {
+      for (uint r = 0; r < mWidth; r++) {
+        int sum = 0;
+        for (uint c = 0; c < mWidth; c++) {
+          sum +=  m1[i * mWidth + c] * m2[c * n + r];
         }
-        result[i*n+r] = sum;
+        result[i*mWidth+r] = sum;
       }
     }
+*/
 
-
-	/*
-#ifdef OCLDBG          
-    for (int i = 0; i < n; i++) {
-      for (int r = 0; r < n; r++) {
-		  printf("%d ",m1[i*n+r]);
-      }
-	  printf("\n");
-    }
-    for (int i = 0; i < n; i++) {
-      for (int r = 0; r < n; r++) {
-		  printf("%d ",m2[i*n+r]);
-      }
-	  printf("\n");
-    }
-    for (int i = 0; i < n; i++) {
-      for (int r = 0; r < n; r++) {
-		  printf("%d ",result[i*n+r]);
-      }
-	  printf("\n");
-    }
-          printf("Done M_OclGPRM_MAT_mult\n");
-#endif                                    
-    */
     return res_idx;
   }
 
@@ -1283,3 +1250,25 @@ void report(__global uint* res_array, uint idx) {
     res_array[4*NTH*idx+4*get_local_id(0)+3]=idx;
 }
         
+void matmultKernel (
+    __global uint *mA,
+    __global uint *mB,
+    __global uint *mC,
+    unsigned int mWidth) {
+
+    uint g_id=get_group_id(0); 
+    uint nunits = get_num_groups(0);
+    uint range = mWidth/nunits;
+	int th_id = get_local_id(0);
+	int n_threads=get_local_size(0);
+    for (uint jj = g_id*range;jj<(g_id+1)*range;jj++) { // loop over part of a row
+    // For every thread, loop over part of a col
+        for (unsigned int ii=th_id*mWidth/n_threads;ii<(th_id+1)*mWidth/n_threads;ii++) {
+            uint elt=0;
+            for (unsigned int k=0;k<mWidth;k++) {
+                elt+=mA[ii*mWidth+k]*mB[k*mWidth+jj];
+            }
+            mC[ii*mWidth+jj]=elt;
+        }
+    }
+}
