@@ -1268,24 +1268,28 @@ void matmultKernel (
     __global uint *mC,
     unsigned int mWidth) {
 
-	uint wg_id=get_group_id(0); 
+  
+
+    uint wg_id=get_group_id(0); 
     uint nunits = get_num_groups(0);
     uint wg_range = mWidth/nunits;
 	uint th_id = get_local_id(0);
 	uint n_threads=get_local_size(0);
-	uint th_range = mWidth/n_threads;
+	uint th_range = wg_range/n_threads;
 #ifdef OCLDBG
 printf("Computing M_OclGPRM_MAT_mult %d %d...\n", mWidth, wg_id);
 #endif
-    for (uint jj = wg_id*wg_range;jj<(wg_id+1)*wg_range;jj++) { // loop over part of a row
-        for (unsigned int ii=th_id*th_range;ii<(th_id+1)*th_range;ii++) {
+     
+    for (uint jj = wg_id*wg_range+th_id*th_range;jj<wg_id*wg_range+(th_id+1)*th_range;jj++) { // loop over part of a row
+        for (unsigned int ii=0;ii<mWidth;ii++) {
             uint elt=0;
             for (unsigned int k=0;k<mWidth;k++) {
-                elt+=mA[(th_range*th_id+ii)*mWidth+k]*mB[k*mWidth+wg_range*wg_id+jj];
+                elt+=mB[jj+mWidth*k]*mA[k+ii*mWidth];
             }
             mC[ii*mWidth+jj]=elt;
         }
     }
+    
 #ifdef OCLDBG
 printf("Done M_OclGPRM_MAT_mult ...\n");
 #endif

@@ -42,11 +42,13 @@ cl_uint* populateData(cl_uint *dataSize, unsigned int nServices) {
   /* Populate input matrices. */
   
   for (uint i = data[1]; i < data[2]; i++) {
-    data[i] = randomNumber(10);
+    data[i] = rand() % 64;//32*2*(cl_int)rand() / (cl_int)RAND_MAX;//randomNumber(10);
+   // std::cout << data[i] <<"\n";
   }
   
   for (uint i = data[2]; i < data[3]; i++) {
-    data[i] = randomNumber(10);
+    data[i] = rand()%64;// 32*2*(cl_int)rand() / (cl_int)RAND_MAX;//randomNumber(10);
+    //std::cout << data[i] <<"\n";
   }
 	*dataSize = data_size;
   return  data;//[n_io_regs + 1];

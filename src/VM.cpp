@@ -294,6 +294,7 @@ int main(int argc, char **argv) {
       commandQueue.finish();
    
     /* Read the results. */
+      // TODO: The smarter thing is to read a sub-buffer of data[]
     commandQueue.enqueueReadBuffer(dataBuffer, CL_TRUE, 0, dataSize * sizeof(cl_uint), data);
 
 #ifdef OCLDBG	  
@@ -368,11 +369,65 @@ int main(int argc, char **argv) {
     *state = READ;
   } // NRUNS  
 #endif
-#if SELECT==4    
+#if SELECT==1
+#elif SELECT==2
+    const unsigned int mSize = WIDTH*WIDTH;
+    const unsigned int mWidth = WIDTH;
+
+    cl_int* mCref=new cl_int[mSize];
+    cl_int mArow[mWidth];
+unsigned int A0=data[1];
+unsigned int B0=data[2];
+unsigned int C0=data[3];
+/*
+std::cout << data[0] <<"\n";
+std::cout << data[1] <<"\n";
+std::cout << data[2] <<"\n";
+std::cout << data[3] <<"\n";
+std::cout << data[4] <<"\n";
+*/  
+    for (uint i = 0; i<mWidth; i++) {
+    	// This is an attempt to put a row in the cache.
+    	// It sometimes works, giving a speed-up of 5x
+    	for (uint j = 0; j<mWidth; j++) {
+    		mArow[j]=data[A0+i*mWidth+j];
+    	}
+        for (uint j = 0; j<mWidth; j++) {
+            cl_int elt=0.0;
+            for (uint k = 0; k<mWidth; k++) {
+            	elt+=mArow[k]*data[B0+k*mWidth+j];
+            }
+            mCref[i*mWidth+j]=elt;
+        }
+    }
+// now compare data[C0+...] to mCref
+  unsigned int correct=0;               // number of correct results returned
+    int nerrors=0;
+    int max_nerrors=mSize;
+    for (unsigned int i = 0; i < mSize; i++) {
+		int diff = data[C0+i] - mCref[i];
+        if(diff==0) { // 2**-20
+            correct++;
+        } else {
+        	nerrors++;
+        	if (nerrors>max_nerrors) break;
+        }
+    }
+
+    if (nerrors==0) {
+	    std::cout << "All "<< correct <<" correct!\n";
+    }  else {
+	    std::cout << "#errors: "<<nerrors<<"\n";
+	    std::cout << "Computed '"<<correct<<"/"<<mSize<<"' correct values!\n";
+    }
+
+    delete[] mCref;
+
+#elif SELECT==4    
     // Print resulting matrix from example 4. MODIFY ME!!
     std::cout << ((int) data[data[6]]) << " " << ((int) data[data[6] + 1]) << std::endl;
     std::cout << ((int) data[data[6] + 2]) << " " << ((int) data[data[6] + 3]) << std::endl;
-#elif SELECT==1
+
 
 #elif SELECT==5
 #if VERBOSE==1    
