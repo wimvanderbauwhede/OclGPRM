@@ -212,27 +212,24 @@ int main(int argc, char **argv) {
 	for (uint ii=0;ii<nServices;ii++) {
 		createSubtask(subtaskTables,ii);//]= createSubt();
 	}
-//    SubtaskTable *subtaskTable = createSubt();
-    // WV: The data buffer covers the whole memory apart from the memory used by the VM's data structures
-	// WV: This is silly, we should use only just as much as we need!
-	// So actually we should set the size of data[] in the populateData routine!
 
-    unsigned long dataSize = (
-            maxGlobalAlloc 
-            - 2* qBufSize * sizeof(packet) 
-            - sizeof(int)
-            - CODE_STORE_SIZE * MAX_BYTECODE_SZ * sizeof(bytecode)
-            - sizeof(SubtaskTable)*nServices            
-            ) / sizeof(cl_uint);// 4; // How many 32-bit integers?
-#ifdef OCLDBG
-    std::cout << "Size of data[]: "<< dataSize << " words\n";
-#endif
     /* The data store */
-    cl_uint *data;// = new cl_uint[dataSize];
+    //cl_uint *data;// = new cl_uint[dataSize];
     
     /* Users Write/allocate memory on the data buffer. */
     // WV: in many cases data depends on nServices
-    unsigned int dataSize = populateData(data,nServices);
+    //unsigned int dataSize = populateData(data,nServices);
+    unsigned int dataSize = 0;
+    cl_uint* data = populateData(&dataSize,nServices);
+#ifdef OCLDBG
+    std::cout << "Size of data[]: "<< dataSize << " words\n";
+    std::cout << "Size of data[]: "<< data[data[0]+1] << " words\n";
+	std::cout << data[0] << "\n";
+	std::cout << data[1] << "\n";
+	std::cout << data[2] << "\n";
+	std::cout << data[3] << "\n";
+	std::cout << data[4] << "\n";
+#endif
     if (
             maxGlobalAlloc 
             - 2* qBufSize * sizeof(packet) 
@@ -247,17 +244,17 @@ int main(int argc, char **argv) {
 	}
 
 #ifdef OCLDBG
-    std::cout << "Buffers allocated in data[]: "<< allocated << " words\n";
+    std::cout << "Buffers allocated in data[]: "<< dataSize << " words\n";
 #endif    
     /* Create memory buffers on the device. */
     cl::Buffer qBuffer = cl::Buffer(context, CL_MEM_READ_WRITE, qBufSize * sizeof(packet));
-    commandQueue.enqueueWriteBuffer(qBuffer, CL_TRUE, 0, qBufSize * sizeof(packet), queues);
+//    commandQueue.enqueueWriteBuffer(qBuffer, CL_TRUE, 0, qBufSize * sizeof(packet), queues);
 
     cl::Buffer rqBuffer = cl::Buffer(context, CL_MEM_READ_WRITE, qBufSize * sizeof(packet));
     commandQueue.enqueueWriteBuffer(rqBuffer, CL_TRUE, 0, qBufSize * sizeof(packet), readQueues);
     
     cl::Buffer stateBuffer = cl::Buffer(context, CL_MEM_READ_WRITE, sizeof(int));
-    commandQueue.enqueueWriteBuffer(stateBuffer, CL_TRUE, 0, sizeof(int), state);
+//    commandQueue.enqueueWriteBuffer(stateBuffer, CL_TRUE, 0, sizeof(int), state);
     
     cl::Buffer codeStoreBuffer = cl::Buffer(context, CL_MEM_READ_ONLY, CODE_STORE_SIZE * MAX_BYTECODE_SZ * sizeof(bytecode));
     commandQueue.enqueueWriteBuffer(codeStoreBuffer, CL_TRUE, 0, CODE_STORE_SIZE * MAX_BYTECODE_SZ * sizeof(bytecode), codeStore);
@@ -266,7 +263,6 @@ int main(int argc, char **argv) {
     commandQueue.enqueueWriteBuffer(subtaskTableBuffer, CL_TRUE, 0, sizeof(SubtaskTable)*nServices, subtaskTables);
 
     cl::Buffer dataBuffer = cl::Buffer(context, CL_MEM_READ_WRITE, dataSize * sizeof(cl_uint));
-    commandQueue.enqueueWriteBuffer(dataBuffer, CL_TRUE, 0, dataSize * sizeof(cl_uint), data);
     
     /* Set kernel arguments. */
     kernel.setArg(0, qBuffer);
@@ -282,10 +278,12 @@ int main(int argc, char **argv) {
     cl::NDRange global(nServices*NTH), local(NTH); // means nServices compute units, one thread per unit
 #if NRUNS > 1    
     for (unsigned int nruns=1;nruns<=NRUNS; nruns++) {
-    commandQueue.enqueueWriteBuffer(qBuffer, CL_TRUE, 0, qBufSize * sizeof(packet), queues);
-    commandQueue.enqueueWriteBuffer(stateBuffer, CL_TRUE, 0, sizeof(int), state);
 #endif        
     double t_start=wsecond();
+    commandQueue.enqueueWriteBuffer(dataBuffer, CL_TRUE, 0, dataSize * sizeof(cl_uint), data);
+    commandQueue.enqueueWriteBuffer(qBuffer, CL_TRUE, 0, qBufSize * sizeof(packet), queues);
+    commandQueue.enqueueWriteBuffer(stateBuffer, CL_TRUE, 0, sizeof(int), state);
+    
     /* Run the kernel on NDRange until completion. */
 	unsigned int iter=1;
     while (*state != COMPLETE ) {

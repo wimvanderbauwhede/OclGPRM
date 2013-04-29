@@ -16,7 +16,7 @@ int randomNumber(int max) {
   return (rand() % (max + 1));
 }
 #if EX == 2
-unsigned int populateData(cl_uint *data, unsigned int nServices) {
+cl_uint* populateData(cl_uint *dataSize, unsigned int nServices) {
   /* Initialise seed for random number generation. */
   srand(1);
   
@@ -24,7 +24,7 @@ unsigned int populateData(cl_uint *data, unsigned int nServices) {
 
   unsigned int buffers_size = 3 * dim * dim;
   unsigned int data_size =  1 + BUFFER_PTR_FILE_SZ + REGISTER_FILE_SZ + buffers_size;
-  data = new cl_uint[data_size];
+  cl_uint* data = new cl_uint[data_size];
 	  //  std::cout << "Matrix dim: "<<dim <<"\n";
 //  exit(0);
   /* Total number of memory sections allocated. */
@@ -48,7 +48,8 @@ unsigned int populateData(cl_uint *data, unsigned int nServices) {
   for (uint i = data[2]; i < data[3]; i++) {
     data[i] = randomNumber(10);
   }
-  return  data[n_io_regs + 1];
+	*dataSize = data_size;
+  return  data;//[n_io_regs + 1];
 }
 
 #elif EX == 5

@@ -8,6 +8,6 @@
 #include <CL/cl.hpp>
 #endif
 #include "SharedTypes.h"
-unsigned int populateData(cl_uint *data, unsigned int nServices);
+cl_uint* populateData(cl_uint *dataSize, unsigned int nServices);
 
 #endif /* _USER_CONFIG_H_ */
