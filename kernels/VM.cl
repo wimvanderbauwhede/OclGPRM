@@ -200,7 +200,7 @@ void pkt_set_payload(packet *p, uint payload);
  * but its the only solution that works - I really don't see the conflict.
 */
 
-__global SubtaskRecord* subt_get_rec(uint i, __global SubtaskTable *subt);
+//curieuse __global SubtaskRecord *subt_get_rec(uint i, __global SubtaskTable *subt);
 ulong get_arg_value(uint arg_pos, __global SubtaskRecord *rec, __global uint *data);
 
 /* Return the subtask record at index i in the subtask table. */
@@ -1274,6 +1274,9 @@ void matmultKernel (
 	uint th_id = get_local_id(0);
 	uint n_threads=get_local_size(0);
 	uint th_range = mWidth/n_threads;
+#ifdef OCLDBG
+printf("Computing M_OclGPRM_MAT_mult %d %d...\n", mWidth, wg_id);
+#endif
     for (uint jj = wg_id*wg_range;jj<(wg_id+1)*wg_range;jj++) { // loop over part of a row
         for (unsigned int ii=th_id*th_range;ii<(th_id+1)*th_range;ii++) {
             uint elt=0;
@@ -1283,4 +1286,7 @@ void matmultKernel (
             mC[ii*mWidth+jj]=elt;
         }
     }
+#ifdef OCLDBG
+printf("Done M_OclGPRM_MAT_mult ...\n");
+#endif
   }

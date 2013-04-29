@@ -70,7 +70,7 @@ int main(int argc, char **argv) {
     try {
 #ifndef GPU              
       /* Use CPU */
-      platforms[0].getDevices(CL_DEVICE_TYPE_CPU, &devices);
+      platforms[1].getDevices(CL_DEVICE_TYPE_CPU, &devices);
 #else      
       /* Use GPU */
       platforms[0].getDevices(CL_DEVICE_TYPE_GPU, &devices);
@@ -90,8 +90,9 @@ int main(int argc, char **argv) {
 
     /* Get the max memory allocation size (in bytes) of the device */
     long maxGlobalAlloc = deviceInfo.global_mem_max_alloc_size(device);
+#ifdef OCLDBG
 	unsigned int maxComputeUnits = deviceInfo.max_compute_units(device);
-    
+#endif    
     /* Create a command queue for the device. */
     cl::CommandQueue commandQueue = cl::CommandQueue(context, device);
 
@@ -228,8 +229,10 @@ int main(int argc, char **argv) {
     
     /* Users Write/allocate memory on the data buffer. */
     // WV: in many cases data depends on nServices
+#ifndef OCLDBG
+    populateData(data,nServices);
+#else // OCLDBG
     unsigned int allocated = populateData(data,nServices);
-#ifdef OCLDBG
     std::cout << "Buffers allocated in data[]: "<< allocated << " words\n";
 #endif    
     /* Create memory buffers on the device. */
@@ -263,10 +266,12 @@ int main(int argc, char **argv) {
     /* Set the NDRange. */
     //ORIG cl::NDRange global(nServices), local(nServices);
     cl::NDRange global(nServices*NTH), local(NTH); // means nServices compute units, one thread per unit
-    double t_start=wsecond();
 #if NRUNS > 1    
     for (unsigned int nruns=1;nruns<=NRUNS; nruns++) {
+    commandQueue.enqueueWriteBuffer(qBuffer, CL_TRUE, 0, qBufSize * sizeof(packet), queues);
+    commandQueue.enqueueWriteBuffer(stateBuffer, CL_TRUE, 0, sizeof(int), state);
 #endif        
+    double t_start=wsecond();
     /* Run the kernel on NDRange until completion. */
 	unsigned int iter=1;
     while (*state != COMPLETE ) {
@@ -278,7 +283,7 @@ int main(int argc, char **argv) {
    
     /* Read the results. */
     commandQueue.enqueueReadBuffer(dataBuffer, CL_TRUE, 0, dataSize * sizeof(cl_uint), data);
-/*
+
 #ifdef OCLDBG	  
 	// Read the subtask table for debugging
 	commandQueue.enqueueReadBuffer(subtaskTableBuffer, CL_TRUE, 0, sizeof(SubtaskTable)*nServices, subtaskTables);
@@ -334,18 +339,23 @@ int main(int argc, char **argv) {
 		}
 	}
 #endif
-*/
+
         toggleState(commandQueue, stateBuffer, state);
         iter++;
     }
     commandQueue.finish();
+    double t_stop=wsecond();
+    double t_elapsed = t_stop - t_start;
+#if VERBOSE==1    
+    std::cout << "Finished in "<<t_elapsed/1000<<" s\n";
+#else
+    std::cout << "\t"<<t_elapsed;
+
+#endif 
 #if NRUNS > 1     
     *state = READ;
   } // NRUNS  
 #endif
-    double t_stop=wsecond();
-    double t_elapsed = t_stop - t_start;
-    std::cout << "Finished in "<<t_elapsed/1000<<" s\n";
 #if SELECT==4    
     // Print resulting matrix from example 4. MODIFY ME!!
     std::cout << ((int) data[data[6]]) << " " << ((int) data[data[6] + 1]) << std::endl;
