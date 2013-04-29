@@ -541,7 +541,7 @@ ulong service_compute(__global SubtaskTable* subt, uint subtask, __global uint *
      uint mWidth = (uint)get_arg_value(3, rec, data);
 
 #ifdef OCLDBG          
-     printf("Got args for M_OclGPRM_MAT_mult, size = %d\n",n);
+     printf("Got args for M_OclGPRM_MAT_mult, size = %d\n",mWidth);
 #endif
     matmultKernel(m1,m2,result,mWidth);
 /* 
@@ -636,6 +636,10 @@ ulong service_compute(__global SubtaskTable* subt, uint subtask, __global uint *
 #endif                                    
 
     ulong arg1 = get_arg_value(0, rec, data);
+#ifdef OCLDBG          
+          printf("Calling M_OclGPRM_MEM_const, address = %d\n",arg1+DATA_INFO_OFFSET);
+          printf("Calling M_OclGPRM_MEM_const, value = %d\n",data[DATA_INFO_OFFSET+arg1]);
+#endif                                    
     return data[arg1 + DATA_INFO_OFFSET]; // the actual constant
   }
     
@@ -1249,26 +1253,34 @@ void report(__global uint* res_array, uint idx) {
     res_array[4*NTH*idx+4*get_local_id(0)+2]=get_group_id(0);
     res_array[4*NTH*idx+4*get_local_id(0)+3]=idx;
 }
-        
+
+/*
+   in each WG g_id, we loop over part of a row, the index is th_range*th_id+ii, for all k
+   in each thread, we loop over part of a column, the col index is wg_range*g_id+jj, for all k
+   k loops 0 .. mWidth-1
+   so we have A[(th_range*th_id+ii)*mWidth+k]
+   and B[ wg_range*g_id+jj + k*mWidth]
+*/
+
 void matmultKernel (
     __global uint *mA,
     __global uint *mB,
     __global uint *mC,
     unsigned int mWidth) {
 
-    uint g_id=get_group_id(0); 
+	uint wg_id=get_group_id(0); 
     uint nunits = get_num_groups(0);
-    uint range = mWidth/nunits;
-	int th_id = get_local_id(0);
-	int n_threads=get_local_size(0);
-    for (uint jj = g_id*range;jj<(g_id+1)*range;jj++) { // loop over part of a row
-    // For every thread, loop over part of a col
-        for (unsigned int ii=th_id*mWidth/n_threads;ii<(th_id+1)*mWidth/n_threads;ii++) {
+    uint wg_range = mWidth/nunits;
+	uint th_id = get_local_id(0);
+	uint n_threads=get_local_size(0);
+	uint th_range = mWidth/n_threads;
+    for (uint jj = wg_id*wg_range;jj<(wg_id+1)*wg_range;jj++) { // loop over part of a row
+        for (unsigned int ii=th_id*th_range;ii<(th_id+1)*th_range;ii++) {
             uint elt=0;
             for (unsigned int k=0;k<mWidth;k++) {
-                elt+=mA[ii*mWidth+k]*mB[k*mWidth+jj];
+                elt+=mA[(th_range*th_id+ii)*mWidth+k]*mB[k*mWidth+wg_range*wg_id+jj];
             }
             mC[ii*mWidth+jj]=elt;
         }
     }
-}
+  }

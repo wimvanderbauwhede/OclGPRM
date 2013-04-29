@@ -278,7 +278,7 @@ int main(int argc, char **argv) {
    
     /* Read the results. */
     commandQueue.enqueueReadBuffer(dataBuffer, CL_TRUE, 0, dataSize * sizeof(cl_uint), data);
-
+/*
 #ifdef OCLDBG	  
 	// Read the subtask table for debugging
 	commandQueue.enqueueReadBuffer(subtaskTableBuffer, CL_TRUE, 0, sizeof(SubtaskTable)*nServices, subtaskTables);
@@ -298,8 +298,7 @@ int main(int argc, char **argv) {
 	}
 	}
 	}
-#endif	  
-#ifdef OCLDBG	  
+
 	// To debug, we need to read the queues and display their content
 	commandQueue.enqueueReadBuffer(qBuffer, CL_TRUE, 0, qBufSize * sizeof(packet), queues);
 	commandQueue.enqueueReadBuffer(rqBuffer, CL_TRUE, 0, qBufSize * sizeof(packet), readQueues);
@@ -312,15 +311,6 @@ int main(int argc, char **argv) {
         std::cout << "\nBuffers for work group " << ii << "\n";
 
 		for (unsigned int jj=0;jj<nServices;jj++) {
-/*
-        std::cout << "Queue pointers for buffer "<< jj <<" in work group " << ii <<":\n";
-
-        std::cout << readQueues[ii*nServices+jj].x<<";"<< readQueues[ii*nServices+jj].y<< "\t";
-        std::cout << queues[ii*nServices+jj].x<< ";"<<queues[ii*nServices+jj].y<<"\n";
-  */      
-	// just dump them, so print every word in this queue
-//        std::cout << "Packets in Read/Write Queue "<<jj<<" in work group " << ii <<":\n";
-        
 			for (unsigned int kk=0;kk< MAX_BYTECODE_SZ ;kk++) {
 
             packet ppr=readQueues[nQueues+ii*nServices * MAX_BYTECODE_SZ + jj * MAX_BYTECODE_SZ + kk] ;
@@ -336,17 +326,15 @@ int main(int argc, char **argv) {
                     unsigned int wsource = (ppw.x >> 2) & 0xFF;
                     unsigned int warg_pos = (ppw.x >>10) & 0xF;
                     unsigned int wpayload= ppw.y ;
-            //std::cout <<jj <<"\t"<<kk<<": " << ppr.x<<";"<<ppr.y<<"\t"<<ppw.x<<";"<<ppw.y<<"\n";
             std::cout <<jj <<"\t"<<kk<<": " << rsubtask <<":"<< rarg_pos <<":"<<rsource<<":"<<rtype  <<";"<<rpayload<<"\t";
             std::cout  << wsubtask <<":"<< warg_pos<<":"<<wsource<<":"<<wtype  <<";"<<wpayload<<"\n";
                         }
-			
 			}		
             
 		}
 	}
 #endif
-
+*/
         toggleState(commandQueue, stateBuffer, state);
         iter++;
     }

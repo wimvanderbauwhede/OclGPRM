@@ -18,8 +18,9 @@ unsigned int populateData(cl_uint *data, unsigned int nServices) {
   /* Initialise seed for random number generation. */
   srand(1);
   
-  int dim = WIDTH ;// N rows of a square matrix.
-  
+  unsigned int dim = WIDTH ;// N rows of a square matrix.
+//  std::cout << "Matrix dim: "<<dim <<"\n";
+//  exit(0);
   /* Total number of memory sections allocated. */
   unsigned int n_io_regs = 4;
   data[0] = n_io_regs;
