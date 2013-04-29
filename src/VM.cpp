@@ -214,6 +214,9 @@ int main(int argc, char **argv) {
 	}
 //    SubtaskTable *subtaskTable = createSubt();
     // WV: The data buffer covers the whole memory apart from the memory used by the VM's data structures
+	// WV: This is silly, we should use only just as much as we need!
+	// So actually we should set the size of data[] in the populateData routine!
+
     unsigned long dataSize = (
             maxGlobalAlloc 
             - 2* qBufSize * sizeof(packet) 
@@ -225,14 +228,25 @@ int main(int argc, char **argv) {
     std::cout << "Size of data[]: "<< dataSize << " words\n";
 #endif
     /* The data store */
-    cl_uint *data = new cl_uint[dataSize];
+    cl_uint *data;// = new cl_uint[dataSize];
     
     /* Users Write/allocate memory on the data buffer. */
     // WV: in many cases data depends on nServices
-#ifndef OCLDBG
-    populateData(data,nServices);
-#else // OCLDBG
-    unsigned int allocated = populateData(data,nServices);
+    unsigned int dataSize = populateData(data,nServices);
+    if (
+            maxGlobalAlloc 
+            - 2* qBufSize * sizeof(packet) 
+            - sizeof(int)
+            - CODE_STORE_SIZE * MAX_BYTECODE_SZ * sizeof(bytecode)
+            - sizeof(SubtaskTable)*nServices            
+			-dataSize
+			< 0
+            ) {
+		std::cout << "ERROR: NOT ENOUGH MEMORY\n";
+		exit(1);
+	}
+
+#ifdef OCLDBG
     std::cout << "Buffers allocated in data[]: "<< allocated << " words\n";
 #endif    
     /* Create memory buffers on the device. */

@@ -1,3 +1,5 @@
+// WV: This needs a complete redesign!
+
 /* As a user you are required to implement the populateData(cl_uint *data) function
    which is used to populate the data store with input data and allocate memory for results. */
 #include "UserData.h"
@@ -19,7 +21,11 @@ unsigned int populateData(cl_uint *data, unsigned int nServices) {
   srand(1);
   
   unsigned int dim = WIDTH ;// N rows of a square matrix.
-//  std::cout << "Matrix dim: "<<dim <<"\n";
+
+  unsigned int buffers_size = 3 * dim * dim;
+  unsigned int data_size =  1 + BUFFER_PTR_FILE_SZ + REGISTER_FILE_SZ + buffers_size;
+  data = new cl_uint[data_size];
+	  //  std::cout << "Matrix dim: "<<dim <<"\n";
 //  exit(0);
   /* Total number of memory sections allocated. */
   unsigned int n_io_regs = 4;
