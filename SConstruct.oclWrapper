@@ -1,0 +1,20 @@
+import os
+import OclBuilder 
+from OclBuilder import initOcl
+
+sources=Split("""
+Packet.cpp
+UserData.cpp
+VM_with_OclWrapper.cc
+timing.cc
+""")
+
+sources = map (lambda s: 'src/'+s, sources)
+
+OclBuilder.useOclWrapper = True
+OclBuilder.kopts= '-I'+os.environ['PWD']+'/include'
+env = initOcl()
+#sources+=[OclBuilder.OPENCL_DIR+'/OpenCLIntegration/DeviceInfo.cc']
+env.Append(CPPPATH=['./include',OclBuilder.OPENCL_DIR+'/OpenCLIntegration'])
+env.Program('oclgprm',sources)	
+
