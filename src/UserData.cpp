@@ -55,8 +55,11 @@ cl_uint* populateData(cl_uint *dataSize, unsigned int nServices) {
 }
 
 #elif EX == 5
-unsigned populateData(cl_uint *data, unsigned int nServices) {
+cl_uint* populateData(cl_uint *dataSize, unsigned int nServices) {
 
+  unsigned int buffers_size = nServices*NTH*4;
+  unsigned int data_size =  1 + BUFFER_PTR_FILE_SZ + REGISTER_FILE_SZ + buffers_size;
+  cl_uint* data = new cl_uint[data_size];
   // number of I/O registers used
   unsigned int n_io_regs = 1;
 
@@ -73,17 +76,21 @@ unsigned populateData(cl_uint *data, unsigned int nServices) {
 		 data[data[1]+ii+3] = 0;
 	}
  
-    return  data[n_io_regs + 1];
+	*dataSize = data_size;
+    return  data;//[n_io_regs + 1];
 
 }
 
 #elif EX == 4
 /* Populates the data store with the data needed for execute example 4. */
-unsigned int populateData(cl_uint *data, unsigned int nServices) {
+cl_uint* populateData(cl_uint *dataSize, unsigned int nServices) {
   /* Initialise seed for random number generation. */
   srand(1);
 
   int dim = 2; // N rows of a square matrix.
+  unsigned int buffers_size = 4 * dim * dim;
+  unsigned int data_size =  1 + BUFFER_PTR_FILE_SZ + REGISTER_FILE_SZ + buffers_size;
+  cl_uint* data = new cl_uint[data_size];
 
   /* Total number of memory sections allocated. */
   // WV I think of this as number of I/O registers used
@@ -122,7 +129,8 @@ unsigned int populateData(cl_uint *data, unsigned int nServices) {
   data[data[2] + 1] = 4;
   data[data[2] + 2] = 7;
   data[data[2] + 3] = 1;
-    return  data[n_io_regs + 1];
+ *dataSize = data_size;
+    return  data;//[n_io_regs + 1];
 
 }
 #elif EX == 1

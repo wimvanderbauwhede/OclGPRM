@@ -37,20 +37,33 @@ typedef ulong bytecode;
  so we should actually use 39 words and have a 32-bit address stack
 */
 typedef struct SubtaskRecord {
-// 32
-  uint service_id;		            // [32bits] Opcode.
-  uint code_addr;					// [32bits]: address of the original bytecode
-  bytecode args[MAX_BYTECODE_SZ-1]; // [64bits] * 15 Pointers to data or constants.
-// 4
-  uchar nargs;						// [8bits]: number of arguments
-  uchar arg_status[MAX_BYTECODE_SZ-1]; // [8bits] * 15 The status of the arguments.
-// 1
+// 32/64
+  uint service_id;		            	// [32bits] Opcode.
+  uint code_addr;				// [32bits]: address of the original bytecode
+  bytecode args[MAX_BYTECODE_SZ-1]; 		// [64bits] * 15/31 Pointers to data or constants.
+// 4/8
+  uchar arg_status[MAX_BYTECODE_SZ-1]; // [8bits] * 15/31 The status of the arguments.
+  uchar nargs;					// [8bits]: number of arguments
+// 1/2
   uchar subt_status;				// [8bits]: [4bits]  Subtask status and [4bits] number of args absent.  
-  uchar return_to;					// [8bits]  The service core to return to.
-  ushort return_as;					// [16bits]: [8bits]  Subtask record address and [8bits] argument position.
-// 2
-  uint padding32[2];				// [32bits] * 3  what it says
-//  ulong padding64[12];				// [64bits] * 12
+#if MAX_BYTECODE_SZ == 32
+  uchar nargs_absent;	
+  ushort return_to;				// [16bits]  The service core to return to.
+#else
+  uchar return_to;
+#endif			// [8bits]
+  ushort return_as;				// [16bits]: [8bits]  Subtask record address and [8bits] argument position.
+#if MAX_BYTECODE_SZ == 32
+  ushort padding16;
+#endif			// [8bits]
+// (2)
+#if MAX_BYTECODE_SZ == 16
+  uint padding32[2];				// [32bits] * 2  what it says
+#endif			// [8bits]
+//  3/6 
+#if MAX_BYTECODE_SZ == 32
+  ulong padding64[3];				// [64bits] * 3
+#endif			// [8bits]
 } SubtaskRecord;
 
 /* The subtask table with associated available record stack. */

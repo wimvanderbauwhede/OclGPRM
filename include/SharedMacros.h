@@ -9,7 +9,7 @@
 #define READ 0
 #define WRITE 1
 // Sizes
-#define MAX_BYTECODE_SZ 16
+#define MAX_BYTECODE_SZ 32 // 32 // 32 // 32 // 32 // 32 // 32 // 32 // 32 // 32 // 32 // 32 // 32 // 32 // 32 // 32 // 32 // 32 // 32 // 32 // 32 // 32 // 32 // 32 // 32 // 32 // 32 // 32 // 32 // 32 // 32 // 32 // 16
 #define CODE_STORE_SIZE (256 * MAX_BYTECODE_SZ)
 #define SUBT_SIZE (1024-1) // -1 because of the stack pointer
 // Various

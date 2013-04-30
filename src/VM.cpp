@@ -1,6 +1,7 @@
 #define __CL_ENABLE_EXCEPTIONS
 #define _IN_HOST
 //#define OCLDBG
+#define USE_SUBBUFFER
 //#define OLD
 
 #ifdef OSX
@@ -28,6 +29,7 @@ const char *KERNEL_NAME = "vm";
 const char *KERNEL_FILE = "kernels/VM.cl";
 // WV: use KERNEL_OPTS from build system
 //const char *KERNEL_BUILD_OPTIONS = "-I/Users/wim/Git/OclGPRM/include/";// -I./include";
+const unsigned int mSize = WIDTH*WIDTH;
 
 
 const int NARGS = 3;
@@ -221,6 +223,10 @@ int main(int argc, char **argv) {
     //unsigned int dataSize = populateData(data,nServices);
     unsigned int dataSize = 0;
     cl_uint* data = populateData(&dataSize,nServices);
+// allocating data for the result
+#ifdef USE_SUBBUFFER
+    cl_uint* mC = new cl_uint[mSize];
+#endif
 #ifdef OCLDBG
     std::cout << "Size of data[]: "<< dataSize << " words\n";
     std::cout << "Size of data[]: "<< data[data[0]+1] << " words\n";
@@ -295,9 +301,12 @@ int main(int argc, char **argv) {
    
     /* Read the results. */
       // TODO: The smarter thing is to read a sub-buffer of data[]
-    commandQueue.enqueueReadBuffer(dataBuffer, CL_TRUE, 0, dataSize * sizeof(cl_uint), data);
+  //  commandQueue.enqueueReadBuffer(dataBuffer, CL_TRUE, 0, dataSize * sizeof(cl_uint), data);
 
 #ifdef OCLDBG	  
+    /* Read the results. */
+      // TODO: The smarter thing is to read a sub-buffer of data[]
+    commandQueue.enqueueReadBuffer(dataBuffer, CL_TRUE, 0, dataSize * sizeof(cl_uint), data);
 	// Read the subtask table for debugging
 	commandQueue.enqueueReadBuffer(subtaskTableBuffer, CL_TRUE, 0, sizeof(SubtaskTable)*nServices, subtaskTables);
 	for (uint kk=0;kk<nServices;kk++) {
@@ -357,6 +366,14 @@ int main(int argc, char **argv) {
         iter++;
     }
     commandQueue.finish();
+    /* Read the results. */
+      // TODO: The smarter thing is to read a sub-buffer of data[]
+
+#ifdef USE_SUBBUFFER
+    commandQueue.enqueueReadBuffer(dataBuffer, CL_TRUE, data[3]*sizeof(cl_uint), mSize * sizeof(cl_uint), mC);
+#else
+    commandQueue.enqueueReadBuffer(dataBuffer, CL_TRUE, 0, dataSize * sizeof(cl_uint), data);
+#endif	
     double t_stop=wsecond();
     double t_elapsed = t_stop - t_start;
 #if VERBOSE==1    
@@ -371,14 +388,16 @@ int main(int argc, char **argv) {
 #endif
 #if SELECT==1
 #elif SELECT==2
-    const unsigned int mSize = WIDTH*WIDTH;
+#if REF != 0
     const unsigned int mWidth = WIDTH;
 
     cl_int* mCref=new cl_int[mSize];
     cl_int mArow[mWidth];
 unsigned int A0=data[1];
 unsigned int B0=data[2];
+#ifndef USE_SUBBUFFER
 unsigned int C0=data[3];
+#endif
 /*
 std::cout << data[0] <<"\n";
 std::cout << data[1] <<"\n";
@@ -405,7 +424,11 @@ std::cout << data[4] <<"\n";
     int nerrors=0;
     int max_nerrors=mSize;
     for (unsigned int i = 0; i < mSize; i++) {
+#ifdef USE_SUBBUFFER
+		int diff = mC[i] - mCref[i];
+#else
 		int diff = data[C0+i] - mCref[i];
+#endif
         if(diff==0) { // 2**-20
             correct++;
         } else {
@@ -413,16 +436,18 @@ std::cout << data[4] <<"\n";
         	if (nerrors>max_nerrors) break;
         }
     }
-
+#ifdef VERBOSE
     if (nerrors==0) {
 	    std::cout << "All "<< correct <<" correct!\n";
     }  else {
 	    std::cout << "#errors: "<<nerrors<<"\n";
 	    std::cout << "Computed '"<<correct<<"/"<<mSize<<"' correct values!\n";
     }
-
+#else
+	    std::cout << "\t"<< correct <<"\t";
+#endif
     delete[] mCref;
-
+#endif
 #elif SELECT==4    
     // Print resulting matrix from example 4. MODIFY ME!!
     std::cout << ((int) data[data[6]]) << " " << ((int) data[data[6] + 1]) << std::endl;

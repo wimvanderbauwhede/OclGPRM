@@ -62,8 +62,8 @@ void matmultKernel ( __global uint *mA, __global uint *mB, __global uint *mC, ui
 #define SYMBOL_ADDRESS_MASK  0xFFFF00000000UL     // 00000000000000001111111111111111 00000000000000000000000000000000
 #define SYMBOL_ADDRESS_SHIFT 32
 
-#define SYMBOL_NARGS_MASK    0xF00000000UL        // 00000000000000000000000000001111 00000000000000000000000000000000
-#define SYMBOL_NARGS_FW		 0xF // 15 args max
+#define SYMBOL_NARGS_MASK    0xFF00000000UL        // 00000000000000000000000011111111 00000000000000000000000000000000
+#define SYMBOL_NARGS_FW	     0xFF // 255 args max
 #define SYMBOL_NARGS_SHIFT   32
 
 #define SYMBOL_SERVICE_MASK  0xFFFFFFFFUL         // 00000000000000000000000000000000 11111111111111111111111111111111
@@ -259,7 +259,7 @@ __kernel void vm(__global packet *q,            /* Compute unit queues. */
     
     /* Synchronise the work items to ensure that all packets have transferred. */
       // WV: don't see that this is needed if there is only one local thread
-    barrier(CLK_GLOBAL_MEM_FENCE);
+    //barrier(CLK_GLOBAL_MEM_FENCE);
 
     if (computation_complete(q, rq, nservicenodes)) {
 #ifdef OCLDBG		
@@ -275,9 +275,11 @@ __kernel void vm(__global packet *q,            /* Compute unit queues. */
       while (q_read(&p, sn_id, i, q, nservicenodes)) {
 //		  printf("Reading packet @WG %d from queue %d\n",sn_id,i);
         parse_pkt(p, rq, nservicenodes, cStore, subt, data);
+	barrier(CLK_LOCAL_MEM_FENCE);
       }
     }
   }
+
 } // END of kernel code
 
 /* Is the entire computation complete? When all compute units are inactive (no packets in their queues)
@@ -680,6 +682,9 @@ ulong service_compute(__global SubtaskTable* subt, uint subtask, __global uint *
           printf("Calling M_OclGPRM_CTRL_begin, work group id = %d\n",get_group_id(0));
 #endif                                    
     ulong nargs = get_nargs(rec);
+#ifdef OCLDBG          
+          printf("Calling M_OclGPRM_CTRL_begin, nargs = %d\n",nargs);
+#endif                                    
     ulong last_arg = get_arg_value(nargs-1, rec, data);
     return last_arg;
   }
@@ -719,7 +724,7 @@ ulong service_compute(__global SubtaskTable* subt, uint subtask, __global uint *
   default:
 	return 0;
   }; // END of switch() of 
-
+//barrier(CLK_GLOBAL_MEM_FENCE);
   return 0;
 } // END of service_compute()
 // ---------------- ---------------- END OF GPRM KERNELS ---------------- ---------------- 
@@ -814,7 +819,11 @@ uint subt_rec_get_arg_status(__global SubtaskRecord *r, uint arg_pos) {
 
 /* Get the subtask record status. */
 uint subt_rec_get_subt_status(__global SubtaskRecord *r) {
-  return (r->subt_status & SUBTREC_STATUS_MASK) >> SUBTREC_STATUS_SHIFT;
+#if MAX_BYTECODE_SZ == 16
+ return (r->subt_status & SUBTREC_STATUS_MASK) >> SUBTREC_STATUS_SHIFT;
+#else
+  return r->subt_status ;
+#endif
 }
 
 /* Get the number of arguments from the subtask record. */
@@ -824,7 +833,11 @@ uint subt_rec_get_nargs(__global SubtaskRecord *r) {
 
 /* Get the number of arguments absent in the subtask record. */
 uint subt_rec_get_nargs_absent(__global SubtaskRecord *r) {
-  return (r->subt_status & SUBTREC_NARGS_ABSENT_MASK);
+#if MAX_BYTECODE_SZ == 16
+ return (r->subt_status & SUBTREC_NARGS_ABSENT_MASK);
+#else
+  return r->nargs_absent;
+#endif
 }
 
 /* Get the subtask record return to attribute. */
@@ -869,8 +882,12 @@ void subt_rec_set_arg_status(__global SubtaskRecord *r, uint arg_pos, uint statu
 
 /* Set the subtask record status. */
 void subt_rec_set_subt_status(__global SubtaskRecord *r, uint status) {
+#if MAX_BYTECODE_SZ == 16
   r->subt_status = (r->subt_status & ~SUBTREC_STATUS_MASK)
     | ((status << SUBTREC_STATUS_SHIFT) & SUBTREC_STATUS_MASK);
+#else
+  r->subt_status = status; 
+#endif
 }
 
 /* Set the subtask record nargs attribute. */
@@ -880,8 +897,12 @@ void subt_rec_set_nargs(__global SubtaskRecord *r, uint nargs) {
 
 /* Set the subtask record nargs_absent attribute. */
 void subt_rec_set_nargs_absent(__global SubtaskRecord *r, uint n) {
-  r->subt_status = (r->subt_status & ~SUBTREC_NARGS_ABSENT_MASK)
+#if MAX_BYTECODE_SZ == 16
+ r->subt_status = (r->subt_status & ~SUBTREC_NARGS_ABSENT_MASK)
     | ((n << SUBTREC_NARGS_ABSENT_SHIFT) & SUBTREC_NARGS_ABSENT_MASK);
+#else
+  r->nargs_absent = n;
+#endif
 }
 
 /* Set the subtask record return to attribute. */
@@ -1158,6 +1179,7 @@ bool q_write(packet value, size_t n_id, size_t q_id,__global packet *q, int n) {
   q[(n*n) + (n_id * n * MAX_BYTECODE_SZ) + (q_id * MAX_BYTECODE_SZ) + index] = value;
   q_set_tail_index((index + 1) % MAX_BYTECODE_SZ, n_id, q_id, q, n);
   q_set_last_op(WRITE, n_id, q_id, q, n);
+	
   return true;
 }
 
@@ -1272,16 +1294,24 @@ void matmultKernel (
 
     uint wg_id=get_group_id(0); 
     uint nunits = get_num_groups(0);
-    uint wg_range = mWidth/nunits;
+    uint wg_range = mWidth/nunits; // 1024/16 = 64
 	uint th_id = get_local_id(0);
 	uint n_threads=get_local_size(0);
-	uint th_range = wg_range/n_threads;
+//	uint th_range = wg_range/n_threads; // becomes 0 if NTH>64
 #ifdef OCLDBG
 printf("Computing M_OclGPRM_MAT_mult %d %d...\n", mWidth, wg_id);
 #endif
      
-    for (uint jj = wg_id*wg_range+th_id*th_range;jj<wg_id*wg_range+(th_id+1)*th_range;jj++) { // loop over part of a row
-        for (unsigned int ii=0;ii<mWidth;ii++) {
+uint th_range = mWidth/n_threads;
+//if (th_range==0) {
+//	th_range=1;
+//}
+// TODO: make sure range is never larger than mWidth
+    for (uint jj = wg_id*wg_range;jj<(wg_id+1)*wg_range;jj++) { // loop over part of a row
+        for (unsigned int ii=th_id*th_range;ii<(th_id+1)*th_range;ii++) {
+
+    //for (uint jj = wg_id*wg_range+th_id*th_range;jj<wg_id*wg_range+(th_id+1)*th_range;jj++) { // loop over part of a row
+      //  for (unsigned int ii=0;ii<mWidth;ii++) {
             uint elt=0;
             for (unsigned int k=0;k<mWidth;k++) {
                 elt+=mB[jj+mWidth*k]*mA[k+ii*mWidth];
@@ -1289,7 +1319,7 @@ printf("Computing M_OclGPRM_MAT_mult %d %d...\n", mWidth, wg_id);
             mC[ii*mWidth+jj]=elt;
         }
     }
-    
+  //	barrier(CLK_GLOBAL_MEM_FENCE);  
 #ifdef OCLDBG
 printf("Done M_OclGPRM_MAT_mult ...\n");
 #endif
