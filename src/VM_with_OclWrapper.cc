@@ -3,7 +3,7 @@
 #define _IN_HOST
 
 //#define OCLDBG
-//#define USE_SUBBUFFER
+#define USE_SUBBUFFER
 
 
 #include <unistd.h>
@@ -210,7 +210,7 @@ int main(int argc, char **argv) {
       // TODO: The smarter thing is to read a sub-buffer of data[]
 
 #ifdef USE_SUBBUFFER
-    ocl.readBuffer(dataBuffer, data[3]*sizeof(cl_uint), mSize * sizeof(cl_uint), mC);
+    ocl.readBuffer(dataBuffer, true, data[3]*sizeof(cl_uint), mSize * sizeof(cl_uint), mC);
 #else
     ocl.readBuffer(dataBuffer, dataSize * sizeof(cl_uint), data);
 #endif	

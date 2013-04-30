@@ -20,7 +20,7 @@
 #include "Packet.h"
 #include "timing.h"
 
-OclGPRM::OclGPRM (const char *bytecodeFile) : nregs_used(0) {
+OclGPRM::OclGPRM (const char *bytecodeFile) : dataSize(1 + BUFFER_PTR_FILE_SZ + REGISTER_FILE_SZ) {
 
 const char *KERNEL_NAME = "vm";
 const char *KERNEL_FILE = "kernels/VM.cl";
@@ -135,7 +135,7 @@ const uint64_t FW_CodeAddress=0x3FFULL;
 
     data_p = new std::vector<unsigned int>(0,1+BUFFER_PTR_FILE_SZ + REGISTER_FILE_SZ);
 }
-
+//-------------------------------------------------------------------------------- 
 OclGPRM::run(unsigned int nServices, unsigned int num_threads) {
     /* Create memory buffers on the device. */
        
@@ -148,7 +148,7 @@ OclGPRM::run(unsigned int nServices, unsigned int num_threads) {
     cl::Buffer subtaskTableBuffer = ocl.makeReadBuffer(sizeof(SubtaskTable)*nServices);
     ocl.writeBuffer(subtaskTableBuffer, sizeof(SubtaskTable)*nServices, subtaskTables);
 
-    cl::Buffer dataBuffer = ocl.makeReadWriteBuffer(dataSize * sizeof(cl_uint));
+    dataBuffer = ocl.makeReadWriteBuffer(dataSize * sizeof(cl_uint));
     cl::Buffer qBuffer = ocl.makeReadBuffer( qBufSize * sizeof(packet));
     cl::Buffer stateBuffer = ocl.makeReadWriteBuffer( sizeof(int));
  
@@ -201,22 +201,38 @@ OclGPRM::run(unsigned int nServices, unsigned int num_threads) {
 
 } // END of run()
 
+//-------------------------------------------------------------------------------- 
 
 //  void OclGPRM::loadBytecode(std::string tdc_file_name) { }
+//-------------------------------------------------------------------------------- 
 
 unsigned int OclGPRM::allocateBuffer(unsigned int pos, unsigned int bufsize) {
-    nregs_used++;
-    regs[pos]=bufsize;
-    data_p->resize(data_p->size()+bufsize);
+    unsigned int wsize = bufsize/sizeof(unsigned int);
+    regs[pos]=wsize;
+    data_p->resize(data_p->size()+wsize);
+    dataSize = data_p->size(); // in words
+}
+//-------------------------------------------------------------------------------- 
+
+unsigned int OclGPRM::writeBuffer(unsigned int pos, void* buf, unsigned int bufsize) {
+    // Essentially a memcpy into data_p
+    unsigned int wsize = bufsize/sizeof(unsigned int);
+    std::vector<unsigned int> bufv;
+    bufv.reserve(wsize);
+    bufv.assign(buf,buf+wsize);
+
+    std::vector<unsigned int>::iterator it = data_p->begin();
+    data_p->insert(it+ data_p->at(pos),bufv.begin(), bufv.end());
+    return data_p->size();
 }
 
-unsigned int OclGPRM::writeBuffer(unsigned int pos, void* buf, unsigned int size) {
-    // Essentially a memcpy
-}
+//-------------------------------------------------------------------------------- 
 
-
-void* OclGPRM::readBuffer(unsigned int pos, unsigned int size) {
+void* OclGPRM::readBuffer(unsigned int pos, unsigned int bufsize) {
     // we read the subbuffer, so we'll need the data buffer as an attribute
+    unsigned int * rbuf = new unsigned int[bufsize];
+    ocl.readBuffer(dataBuffer, true, data[pos+1]*sizeof(cl_uint), bufsize, rbuf);
+    return rbuf;
 }
 
 

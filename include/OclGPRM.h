@@ -18,10 +18,9 @@ class OclGPRM {
         packet *readQueues;
         bytecode *codeStore;
         SubtaskTable* subtaskTables;
-
+        cl::Buffer dataBuffer;
         std::vector<unsigned int>* data_p;
-        unsigned int nregs_used;
-        unsigned int regs[BUFFER_PTR_FILE_SZ];
+        unsigned int dataSize;
         OclWrapper ocl
         std::deque<bytecode> bytecodeWords;
         std::deque< std::deque<bytecode> > bytecodePackets;
