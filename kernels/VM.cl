@@ -94,7 +94,7 @@ void matmultKernel ( __global uint *mA, __global uint *mB, __global uint *mC, ui
 /******* Function Prototypes *******/
 /***********************************/
 
-void parse_pkt(packet p, __global packet *q, int n, __global bytecode *cStore, __global SubtaskTable *subt, __global uint *data);
+void parse_pkt(packet p, __global packet *q, int n, __global bytecode *cStore, __global SubtaskTable *subtask_list, __global uint *data);
 uint parse_subtask(uint source,
                    uint arg_pos,
                    uint subtask,
@@ -102,20 +102,20 @@ uint parse_subtask(uint source,
                    __global packet *q,
                    int n,
                    __global bytecode *cStore,
-                   __global SubtaskTable *subt,
+                   __global SubtaskTable *subtask_list,
                    __global uint *data);
-ulong service_compute(__global SubtaskTable* subt, uint subtask,__global uint *data);
+ulong service_compute(__global SubtaskTable* subtask_list, uint subtask,__global uint *data);
 bool computation_complete(__global packet *q,  __global packet *rq, int n);
 
-void subt_store_symbol(bytecode payload, uint arg_pos, uint i, __global SubtaskTable *subt);
-bool subt_is_ready(uint i, __global SubtaskTable *subt);
-bool subt_push(uint i, __global SubtaskTable *subt);
-bool subt_pop(uint *result, __global SubtaskTable *subt);
-bool subt_is_full(__global SubtaskTable *subt);
-bool subt_is_empty(__global SubtaskTable *subt);
-void subt_cleanup(uint i, __global SubtaskTable *subt);
-uint subt_top(__global SubtaskTable *subt);
-void subt_set_top(__global SubtaskTable *subt, uint i);
+void subt_store_symbol(bytecode payload, uint arg_pos, uint i, __global SubtaskTable *subtask_list);
+bool subt_is_ready(uint i, __global SubtaskTable *subtask_list);
+bool subt_push(uint i, __global SubtaskTable *subtask_list);
+bool subt_pop(uint *result, __global SubtaskTable *subtask_list);
+bool subt_is_full(__global SubtaskTable *subtask_list);
+bool subt_is_empty(__global SubtaskTable *subtask_list);
+void subt_cleanup(uint i, __global SubtaskTable *subtask_list);
+uint subt_top(__global SubtaskTable *subtask_list);
+void subt_set_top(__global SubtaskTable *subtask_list, uint i);
 
 uint subt_rec_get_service_id(__global SubtaskRecord *r);
 bytecode subt_rec_get_arg(__global SubtaskRecord *r, uint arg_pos);
@@ -134,6 +134,7 @@ void subt_rec_set_arg_status(__global SubtaskRecord *r, uint arg_pos, uint statu
 void subt_rec_set_subt_status(__global SubtaskRecord *r, uint status);
 void subt_rec_set_nargs(__global SubtaskRecord *r, uint n);
 void subt_rec_set_nargs_absent(__global SubtaskRecord *r, uint n);
+void subt_rec_incr_nargs_absent(__global SubtaskRecord *r);
 void subt_rec_set_code_addr(__global SubtaskRecord *r, uint return_to);
 void subt_rec_set_return_to(__global SubtaskRecord *r, uint return_to);
 void subt_rec_set_return_as(__global SubtaskRecord *r, uint return_as);
@@ -200,12 +201,12 @@ void pkt_set_payload(packet *p, uint payload);
  * but its the only solution that works - I really don't see the conflict.
 */
 
-//curieuse __global SubtaskRecord *subt_get_rec(uint i, __global SubtaskTable *subt);
+//curieuse __global SubtaskRecord *subt_get_rec(uint i, __global SubtaskTable *subtask_list);
 ulong get_arg_value(uint arg_pos, __global SubtaskRecord *rec, __global uint *data);
 
 /* Return the subtask record at index i in the subtask table. */
-__global SubtaskRecord *subt_get_rec(uint i, __global SubtaskTable *subt) {
-  return &(subt[get_group_id(0)].recs[i]);
+__global SubtaskRecord *subt_get_rec(uint i, __global SubtaskTable *subtask_list) {
+  return &(subtask_list[get_group_id(0)].recs[i]);
 }
 
 // ------------------------------- GPRM KERNEL API -------------------------------
@@ -246,7 +247,7 @@ __kernel void vm(__global packet *q,            /* Compute unit queues. */
                  uint nservicenodes,             /* The number of service nodes. */
                  __global int *state,           /* Are we in the READ or WRITE state? */
                  __global bytecode *cStore,     /* The code store. */
-                 __global SubtaskTable *subt,           /* The subtask table. */
+                 __global SubtaskTable *subtask_list,           /* The subtask table. */
                  __global uint *data            /* Data memory for temporary results. */
                  ) {
  size_t th_id = get_local_id(0);
@@ -274,7 +275,7 @@ __kernel void vm(__global packet *q,            /* Compute unit queues. */
       packet p;
       while (q_read(&p, sn_id, i, q, nservicenodes)) {
 //		  printf("Reading packet @WG %d from queue %d\n",sn_id,i);
-        parse_pkt(p, rq, nservicenodes, cStore, subt, data);
+        parse_pkt(p, rq, nservicenodes, cStore, subtask_list, data);
 	barrier(CLK_LOCAL_MEM_FENCE);
       }
     }
@@ -300,7 +301,7 @@ bool computation_complete(__global packet *q, __global packet *rq, int n) {
 }
 
 /* Inspect a packet and perform some action depending on its contents. */
-void parse_pkt(packet p, __global packet *q, int nservicenodes, __global bytecode *cStore, __global SubtaskTable *subt, __global uint *data) {
+void parse_pkt(packet p, __global packet *q, int nservicenodes, __global bytecode *cStore, __global SubtaskTable *subtask_list, __global uint *data) {
   uint type = pkt_get_type(p);
   uint source = pkt_get_source(p);
   uint arg_pos = pkt_get_arg_pos(p);
@@ -332,11 +333,11 @@ void parse_pkt(packet p, __global packet *q, int nservicenodes, __global bytecod
 
   case REFERENCE: {
     /* Create a new subtask record */
-    uint ref_subtask = parse_subtask(source, arg_pos, subtask, address, q, nservicenodes, cStore, subt, data);
+    uint ref_subtask = parse_subtask(source, arg_pos, subtask, address, q, nservicenodes, cStore, subtask_list, data);
     
-    if (subt_is_ready(ref_subtask, subt)) {
+    if (subt_is_ready(ref_subtask, subtask_list)) {
       /* Perform the computation. */
-      ulong result = service_compute(subt, ref_subtask, data);
+      ulong result = service_compute(subtask_list, ref_subtask, data);
       // In principle, result is a 64-bit integer as it could be a symbol
 
 	  // In practice, the only case when we need more than 32 bits is K_R
@@ -368,7 +369,7 @@ void parse_pkt(packet p, __global packet *q, int nservicenodes, __global bytecod
       q_write(p, sn_id,source, q, nservicenodes);
 
       /* Free up the subtask record so that it may be re-used. */
-      subt_cleanup(ref_subtask, subt);
+      subt_cleanup(ref_subtask, subtask_list);
       }
     }
     break;
@@ -376,14 +377,14 @@ void parse_pkt(packet p, __global packet *q, int nservicenodes, __global bytecod
     
   case DATA: {
     /* Store the data in the subtask record. */
-    subt_store_symbol(SYMBOL_KP_ZERO + address, arg_pos, subtask, subt);
+    subt_store_symbol(SYMBOL_KP_ZERO + address, arg_pos, subtask, subtask_list);
 
-    if (subt_is_ready(subtask, subt)) {
+    if (subt_is_ready(subtask, subtask_list)) {
       /* Perform the computation. */
-      ulong result = service_compute(subt, subtask, data);
+      ulong result = service_compute(subtask_list, subtask, data);
       if (th_id==0) {
       /* Figure out where to send the result to. */
-      __global SubtaskRecord *rec = subt_get_rec(subtask, subt);
+      __global SubtaskRecord *rec = subt_get_rec(subtask, subtask_list);
       uint return_to = subt_rec_get_return_to(rec);
       uint return_as_addr = subt_rec_get_return_as_addr(rec);
       uint return_as_pos = subt_rec_get_return_as_pos(rec);
@@ -398,7 +399,7 @@ void parse_pkt(packet p, __global packet *q, int nservicenodes, __global bytecod
       q_write(p, sn_id,return_to, q, nservicenodes);
 
       /* Free up the subtask record so that it may be re-used. */
-      subt_cleanup(subtask, subt);
+      subt_cleanup(subtask, subtask_list);
       }
 #ifdef OCLDBG		  
       else {
@@ -420,14 +421,14 @@ uint parse_subtask(uint source,                  /* The compute unit who sent th
                    __global packet *q,
                    int nservicenodes,
                    __global bytecode *cStore,
-                   __global SubtaskTable *subt,
+                   __global SubtaskTable *subtask_list,
                    __global uint *data
                    ) {
 	//printf("parse_subtask() in WG %d\n",get_group_id(0));
   /* Get an available subtask record from the stack */
   uint av_index; // WV: av_index is the subtask address
-  while (!subt_pop(&av_index, subt)) {} // WV: weird!
-  __global SubtaskRecord *rec = subt_get_rec(av_index, subt);
+  while (!subt_pop(&av_index, subtask_list)) {} // WV: weird!
+  __global SubtaskRecord *rec = subt_get_rec(av_index, subtask_list);
 
   /* Get the K_S symbol from the code store. */
   bytecode symbol = cStore[address * MAX_BYTECODE_SZ];
@@ -469,7 +470,7 @@ uint parse_subtask(uint source,                  /* The compute unit who sent th
  );
 #endif      
 */
-        subt_store_symbol(symbol, arg_pos, av_index, subt);
+        subt_store_symbol(symbol, arg_pos, av_index, subtask_list);
       } else {
 		  /*
 #ifdef OCLDBG          
@@ -505,7 +506,7 @@ uint parse_subtask(uint source,                  /* The compute unit who sent th
 #ifdef OCLDBG      
 //	printf("Found K_B: %u\n",symbol_get_value(symbol));
 #endif      
-      subt_store_symbol(symbol, arg_pos, av_index, subt);
+      subt_store_symbol(symbol, arg_pos, av_index, subtask_list);
       break;
 			  }
     } // END of switch()
@@ -519,8 +520,8 @@ uint parse_subtask(uint source,                  /* The compute unit who sent th
 
 /* Perform the computation represented by a subtask record and return a relative index
    to the result in the data buffer. */
-ulong service_compute(__global SubtaskTable* subt, uint subtask, __global uint *data) {
-  __global SubtaskRecord *rec = subt_get_rec(subtask, subt);
+ulong service_compute(__global SubtaskTable* subtask_list, uint subtask, __global uint *data) {
+  __global SubtaskRecord *rec = subt_get_rec(subtask, subtask_list);
   uint service_details = subt_rec_get_service_id(rec);
 
   uint library = symbol_get_SNLId(service_details);
@@ -734,8 +735,8 @@ ulong service_compute(__global SubtaskTable* subt, uint subtask, __global uint *
 /*********************************/
 
 /* Store a symbol in argument 'arg_pos' at subtask record 'i'. */
-void subt_store_symbol(bytecode symbol, uint arg_pos, uint i, __global SubtaskTable *subt) {
-  __global SubtaskRecord *rec = subt_get_rec(i, subt);
+void subt_store_symbol(bytecode symbol, uint arg_pos, uint i, __global SubtaskTable *subtask_list) {
+  __global SubtaskRecord *rec = subt_get_rec(i, subtask_list);
   subt_rec_set_arg(rec, arg_pos, symbol);
   uint nargs_absent = subt_rec_get_nargs_absent(rec) - 1;
   subt_rec_set_arg_status(rec, arg_pos, PRESENT);
@@ -743,59 +744,59 @@ void subt_store_symbol(bytecode symbol, uint arg_pos, uint i, __global SubtaskTa
 }
 
 /* Is the subtask record at index i ready for computation? */
-bool subt_is_ready(uint i, __global SubtaskTable *subt) {
-  __global SubtaskRecord *rec = subt_get_rec(i, subt);
+bool subt_is_ready(uint i, __global SubtaskTable *subtask_list) {
+  __global SubtaskRecord *rec = subt_get_rec(i, subtask_list);
   return subt_rec_get_nargs_absent(rec) == 0;
 }
 
 /* Remove the subtask record at index i from the subtask table and return
    it to the stack of available records. */
-bool subt_push(uint i, __global SubtaskTable *subt) {
-  if (subt_is_empty(subt)) {
+bool subt_push(uint i, __global SubtaskTable *subtask_list) {
+  if (subt_is_empty(subtask_list)) {
     return false;
   }
   
-  uint top = subt_top(subt);
-  subt[get_group_id(0)].av_recs[top - 1] = i;
-  subt_set_top(subt, top - 1);
+  uint top = subt_top(subtask_list);
+  subtask_list[get_group_id(0)].av_recs[top - 1] = i;
+  subt_set_top(subtask_list, top - 1);
   return true;
 }
 
 /* Return an available subtask record index from the subtask table. */
-bool subt_pop(uint *av_index, __global SubtaskTable *subt) {
-  if (subt_is_full(subt)) {
+bool subt_pop(uint *av_index, __global SubtaskTable *subtask_list) {
+  if (subt_is_full(subtask_list)) {
     return false;
   }
 
-  uint top = subt_top(subt);
-  *av_index = subt[get_group_id(0)].av_recs[top];
-  subt_set_top(subt, top + 1);
+  uint top = subt_top(subtask_list);
+  *av_index = subtask_list[get_group_id(0)].av_recs[top];
+  subt_set_top(subtask_list, top + 1);
   return true;
 }
 
 /* Remove and cleanup the subtask record at index i from the subtask table. */
-void subt_cleanup(uint i, __global SubtaskTable *subt) {
-  subt_push(i, subt);
+void subt_cleanup(uint i, __global SubtaskTable *subtask_list) {
+  subt_push(i, subtask_list);
 }
 
 /* Is the subtask table full? */
-bool subt_is_full(__global SubtaskTable *subt) {
-  return subt_top(subt) == SUBT_SIZE + 1;
+bool subt_is_full(__global SubtaskTable *subtask_list) {
+  return subt_top(subtask_list) == SUBT_SIZE + 1;
 }
 
 /* Is the subtask table empty? */
-bool subt_is_empty(__global SubtaskTable *subt) {
-  return subt_top(subt) == 1;
+bool subt_is_empty(__global SubtaskTable *subtask_list) {
+  return subt_top(subtask_list) == 1;
 }
 
 /* Return the top of available records stack index. */
-uint subt_top(__global SubtaskTable *subt) {
-  return subt[get_group_id(0)].av_recs[0];
+uint subt_top(__global SubtaskTable *subtask_list) {
+  return subtask_list[get_group_id(0)].av_recs[0];
 }
 
 /* Set the top of available records stack index. */
-void subt_set_top(__global SubtaskTable *subt, uint i) {
-  subt[get_group_id(0)].av_recs[0] = i;
+void subt_set_top(__global SubtaskTable *subtask_list, uint i) {
+  subtask_list[get_group_id(0)].av_recs[0] = i;
 }
 
 /**********************************/
@@ -902,6 +903,17 @@ void subt_rec_set_nargs_absent(__global SubtaskRecord *r, uint n) {
     | ((n << SUBTREC_NARGS_ABSENT_SHIFT) & SUBTREC_NARGS_ABSENT_MASK);
 #else
   r->nargs_absent = n;
+#endif
+}
+
+/* Set the subtask record nargs_absent attribute. */
+void subt_rec_incr_nargs_absent(__global SubtaskRecord *r) {
+#if MAX_BYTECODE_SZ == 16
+	uint n = subt_rec_get_nargs_absent(r)+1;
+ r->subt_status = (r->subt_status & ~SUBTREC_NARGS_ABSENT_MASK)
+    | ((n << SUBTREC_NARGS_ABSENT_SHIFT) & SUBTREC_NARGS_ABSENT_MASK);
+#else
+  r->nargs_absent++;
 #endif
 }
 
