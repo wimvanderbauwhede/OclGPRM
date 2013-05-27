@@ -106,7 +106,7 @@ uint parse_subtask(uint source,
                    __global uint *data);
 ulong service_compute(__global SubtaskTable* subtask_list, uint subtask,__global uint *data);
 bool computation_complete(__global packet *q,  __global packet *rq, int n);
-
+bytecode get_symbol(__global bytecode *cStore, uint code_addr, uint idx);
 void subt_store_symbol(bytecode payload, uint arg_pos, uint i, __global SubtaskTable *subtask_list);
 bool subt_is_ready(uint i, __global SubtaskTable *subtask_list);
 bool subt_push(uint i, __global SubtaskTable *subtask_list);
@@ -155,6 +155,7 @@ uint symbol_get_address(bytecode s);
 uint symbol_get_nargs(bytecode s);
 uint symbol_get_value(bytecode s);
 void symbol_set_kind(bytecode *s, ulong kind);
+bytecode symbol_set_quoted(bytecode, uint);
 void symbol_quote(bytecode *s);
 void symbol_unquote(bytecode *s);
 void symbol_set_service(bytecode *s, ulong service);
@@ -520,8 +521,8 @@ uint parse_subtask(uint source,                  /* The compute unit who sent th
 
 /* Perform the computation represented by a subtask record and return a relative index
    to the result in the data buffer. */
-ulong service_compute(__global SubtaskTable* subtask_list, uint subtask, __global uint *data) {
-  __global SubtaskRecord *rec = subt_get_rec(subtask, subtask_list);
+ulong service_compute(__global SubtaskTable* subtask_list, uint current_subtask, __global uint *data) {
+  __global SubtaskRecord *rec = subt_get_rec(current_subtask, subtask_list);
   uint service_details = subt_rec_get_service_id(rec);
 
   uint library = symbol_get_SNLId(service_details);
@@ -722,6 +723,7 @@ ulong service_compute(__global SubtaskTable* subtask_list, uint subtask, __globa
         return get_arg_value(argidx, rec, data);
     }                                
   }
+
   default:
 	return 0;
   }; // END of switch() of 
@@ -1037,6 +1039,9 @@ void symbol_set_kind(bytecode *s, ulong kind) {
   *s = ((*s) & ~SYMBOL_KIND_MASK) | ((kind << SYMBOL_KIND_SHIFT) & SYMBOL_KIND_MASK);
 }
 
+bytecode symbol_set_quoted(bytecode s, uint q) {
+	return (s & ~SYMBOL_QUOTED_MASK) | ((q << SYMBOL_QUOTED_SHIFT) & SYMBOL_QUOTED_MASK);
+}
 /* Return true if the symbol is quoted, false otherwise. */
 void symbol_quote(bytecode *s) {
   *s = ((*s) & ~SYMBOL_QUOTED_MASK) | ((1UL << SYMBOL_QUOTED_SHIFT) & SYMBOL_QUOTED_MASK);
@@ -1336,3 +1341,55 @@ uint th_range = mWidth/n_threads;
 printf("Done M_OclGPRM_MAT_mult ...\n");
 #endif
   }
+
+bytecode get_symbol(__global bytecode *cStore, uint code_addr, uint idx) {
+	return cStore[code_addr * MAX_BYTECODE_SZ + 1 + idx];
+}
+/*
+void dispatch_reference(uint idx, uint st, bytecode ref_symbol, __global SubtaskRecord *rec, __global uint *data) {
+	uint dest_snid=symbol_get_SNId(ref_symbol);
+
+	Word nref_symbol=symbol_set_quoted(ref_symbol,0);
+	// Change subtask status, args etc
+
+	subt_rec_set_arg(rec,idx,nref_symbol);
+	subt_rec_incr_nargs_absent(rec);
+	subt_rec_set_subt_status(rec,STS_blocked);
+
+	Word ncalled_as=subt_rec_get_called_as(rec);
+	uint return_to=symbol_get_SNId(ncalled_as);
+
+	// change subtask status, required for core_control
+	subt_rec_set_subt_status(rec,STS_processing);
+
+	// arg status is "requested" for the corresponding argument
+	// NEEDED?
+	Word nnref_symbol=setStatus(ref_symbol,DS_requested);
+	sba_tile.service_manager.subtask_list.symbol(_current_subtask,idx,nnref_symbol);
+
+	 // change Core status
+	core_status=CS_managed;
+	// Create a reference packet
+	uint to=dest_snid;
+	// "address" is the address of the current core
+	Word var_label = symbol_set_subtask(ref_symbol,address);
+	var_label = symbol_set_name(var_label,return_to);
+	Packet_Type packet_type=P_reference;
+	Word subtask_argpos=get_arg_value(idx, rec, data);
+	subtask_argpos=symbol_set_subtask(subtask_argpos,st);
+	subtask_argpos=symbol_set_task(subtask_argpos,idx);
+
+	Word_List reslist;
+	reslist.push_back(ref_symbol);
+	Length_t payload_length=1;
+	Header_t ref_packet_header = mkHeader(packet_type,prio,redir,payload_length,to,return_to,subtask_argpos,return_as);
+	Word_List  ref_packet_payload=reslist;
+	Packet_t ref_packet = mkPacket(ref_packet_header,ref_packet_payload);
+	 // post it
+	if (to!=return_to){
+		sba_tile.transceiver->tx_fifo.push_back(ref_packet);
+	} else {
+		sba_tile.service_manager.subtask_reference_fifo.push_back(ref_packet);
+	}
+ } // END of dispatch_reference()
+ */

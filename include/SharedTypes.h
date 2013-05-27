@@ -27,7 +27,7 @@ typedef uint2 packet;
 
 /* Bytecode consists of 64bit words. */
 typedef ulong bytecode;
-
+typedef ulong Word;
 /* A subtask table record. */
 /* WV  
  added nargs and code_address 
