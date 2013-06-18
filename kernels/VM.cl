@@ -37,14 +37,16 @@ void matmultKernel ( __global uint *mA, __global uint *mB, __global uint *mC, ui
 #define SUBTREC_RETURN_AS_POS_SHIFT  0
 
 /* Subtask record status. */
-#define NEW        0
-#define PROCESSING 1
-#define PENDING    2
-
+#define STS_new			0
+#define STS_pending		1
+#define STS_processing	2
+#define STS_processed	3
+#define STS_cleanup		4
+#define STS_blocked		5
 /* Subtask record arg status. */
-#define ABSENT     0
-#define REQUESTING 1
-#define PRESENT    2
+#define DS_absent     0
+#define DS_present    1
+#define DS_requested  2
 
 /* Used to access symbol information. */
 
@@ -440,7 +442,7 @@ uint parse_subtask(uint source,                  /* The compute unit who sent th
 
   subt_rec_set_service_id(rec, service);
   subt_rec_set_code_addr(rec, address);
-  subt_rec_set_subt_status(rec, NEW);
+  subt_rec_set_subt_status(rec, STS_new);
   subt_rec_set_nargs(rec, nargs);
   subt_rec_set_nargs_absent(rec, nargs);
   subt_rec_set_return_to(rec, source);
@@ -448,11 +450,11 @@ uint parse_subtask(uint source,                  /* The compute unit who sent th
   subt_rec_set_return_as_pos(rec, arg_pos);
 
   /* Begin argument processing */
-  subt_rec_set_subt_status(rec, PROCESSING);
+  subt_rec_set_subt_status(rec, STS_processing);
 
   for (uint arg_pos = 0; arg_pos < nargs; arg_pos++) {
     /* Mark argument as absent. */
-    subt_rec_set_arg_status(rec, arg_pos, ABSENT);
+    subt_rec_set_arg_status(rec, arg_pos, DS_absent);
 
     /* Get the next symbol (K_R or K_B) */
     symbol = cStore[(address * MAX_BYTECODE_SZ) + arg_pos + 1];
@@ -499,7 +501,7 @@ uint parse_subtask(uint source,                  /* The compute unit who sent th
         q_write(p, get_group_id(0), destination, q, nservicenodes);
 
         /* Mark argument as requested. */
-        subt_rec_set_arg_status(rec, arg_pos, REQUESTING);
+        subt_rec_set_arg_status(rec, arg_pos, DS_requested);
       }
       break;
 
@@ -514,7 +516,7 @@ uint parse_subtask(uint source,                  /* The compute unit who sent th
   } // for()
 
   /* Waiting for references to be computed. */
-  subt_rec_set_subt_status(rec, PENDING);
+  subt_rec_set_subt_status(rec, STS_pending);
 
   return av_index;
 } // END of parse_subtask()
@@ -741,7 +743,7 @@ void subt_store_symbol(bytecode symbol, uint arg_pos, uint i, __global SubtaskTa
   __global SubtaskRecord *rec = subt_get_rec(i, subtask_list);
   subt_rec_set_arg(rec, arg_pos, symbol);
   uint nargs_absent = subt_rec_get_nargs_absent(rec) - 1;
-  subt_rec_set_arg_status(rec, arg_pos, PRESENT);
+  subt_rec_set_arg_status(rec, arg_pos, DS_present);
   subt_rec_set_nargs_absent(rec, nargs_absent);
 }
 
@@ -1366,7 +1368,7 @@ void dispatch_reference(uint idx, uint st, bytecode ref_symbol, __global Subtask
 	// NEEDED?
 	Word nnref_symbol=setStatus(ref_symbol,DS_requested);
 	sba_tile.service_manager.subtask_list.symbol(_current_subtask,idx,nnref_symbol);
-
+	subt_rec_set_arg_status(rec,idx,DS_requested);
 	 // change Core status
 	core_status=CS_managed;
 	// Create a reference packet

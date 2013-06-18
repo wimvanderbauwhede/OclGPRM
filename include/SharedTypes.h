@@ -7,11 +7,11 @@
 
 /* Replace the types for use in host program source. */
 #ifdef _IN_HOST
-#define uchar cl_uchar
-#define ushort cl_ushort
-#define uint cl_uint
-#define uint2 cl_uint2
-#define ulong cl_ulong
+#define uchar unsigned char
+#define ushort unsigned short
+#define uint unsigned int
+#define uint2 unsigned long
+#define ulong unsigned long
 #endif
 
 /* A packet is 2x32bit words.
@@ -23,6 +23,8 @@
    payload_type:1bit  00000001000000000000000000000000  The payload type. */
 #ifndef _IN_HOST
 typedef uint2 packet;
+#else
+typedef unsigned long packet;
 #endif
 
 /* Bytecode consists of 64bit words. */
